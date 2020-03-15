@@ -6,6 +6,9 @@ import (
 	"github.com/GoAdminGroup/go-admin/template"
 	"github.com/GoAdminGroup/go-admin/template/chartjs"
 	_ "github.com/GoAdminGroup/themes/adminlte"
+	"log"
+	"os"
+	"os/signal"
 
 	"github.com/GoAdminGroup/go-admin/engine"
 	"github.com/GoAdminGroup/go-admin/examples/datamodel"
@@ -13,9 +16,7 @@ import (
 	"github.com/GoAdminGroup/go-admin/modules/language"
 	"github.com/GoAdminGroup/go-admin/plugins/admin"
 	"github.com/GoAdminGroup/go-admin/plugins/example"
-	"github.com/GoAdminGroup/go-admin/template/types"
-	"github.com/kataras/iris"
-	"github.com/kataras/iris/context"
+	"github.com/kataras/iris/v12"
 )
 
 func main() {
@@ -37,12 +38,16 @@ func main() {
 			},
 		},
 		UrlPrefix: "admin",
-		IndexUrl:  "/",
-		Debug:     true,
-		Language:  language.CN,
+		Store: config.Store{
+			Path:   "./uploads",
+			Prefix: "uploads",
+		},
+		IndexUrl: "/",
+		Debug:    true,
+		Language: language.CN,
 	}
 
-	adminPlugin := admin.NewAdmin(datamodel.Generators)
+	adminPlugin := admin.NewAdmin(datamodel.Generators).AddDisplayFilterXssJsFilter()
 
 	// add generator, first parameter is the url prefix of table when visit.
 	// example:
@@ -62,25 +67,35 @@ func main() {
 	// examplePlugin := plugins.LoadFromPlugin("../datamodel/example.so")
 
 	// customize the login page
-	// example: https://github.com/GoAdminGroup/go-admin/blob/master/demo/main.go#L30
+	// example: https://github.com/GoAdminGroup/demo.go-admin.cn/blob/master/main.go#L39
 	//
 	// template.AddComp("login", datamodel.LoginPage)
 
 	// load config from json file
 	//
-	// eng.AddConfigFromJson("../datamodel/config.json")
+	// eng.AddConfigFromJSON("../datamodel/config.json")
 
 	if err := eng.AddConfig(cfg).AddPlugins(adminPlugin, examplePlugin).Use(app); err != nil {
 		panic(err)
 	}
 
-	// you can custom your pages like:
-
-	app.Get("/admin", func(context context.Context) {
-		engine.Content(context, func(ctx interface{}) (types.Panel, error) {
-			return datamodel.GetContent()
-		})
+	app.HandleDir("/uploads", "./uploads", iris.DirOptions{
+		IndexName: "/index.html",
+		Gzip:      false,
+		ShowList:  false,
 	})
 
-	_ = app.Run(iris.Addr(":8099"))
+	// you can custom your pages like:
+
+	eng.HTML("GET", "/admin", datamodel.GetContent)
+
+	go func() {
+		_ = app.Run(iris.Addr(":8099"))
+	}()
+
+	quit := make(chan os.Signal)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Print("closing database connection")
+	eng.MysqlConnection().Close()
 }

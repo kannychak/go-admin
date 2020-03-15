@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -6,26 +6,67 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/modules/service"
 )
 
 const (
-	DriverMysql      = "mysql"
-	DriverMssql      = "mssql"
-	DriverSqlite     = "sqlite"
+	// DriverMysql is a const value of mysql driver.
+	DriverMysql = "mysql"
+	// DriverSqlite is a const value of sqlite driver.
+	DriverSqlite = "sqlite"
+	// DriverPostgresql is a const value of postgresql driver.
 	DriverPostgresql = "postgresql"
+	// DriverMssql is a const value of mssql driver.
+	DriverMssql = "mssql"
 )
 
+// Connection is a connection handler of database.
 type Connection interface {
+	// Query is the query method of sql.
 	Query(query string, args ...interface{}) ([]map[string]interface{}, error)
+
+	// Exec is the exec method of sql.
 	Exec(query string, args ...interface{}) (sql.Result, error)
+
+	// QueryWithConnection is the query method with given connection of sql.
 	QueryWithConnection(conn, query string, args ...interface{}) ([]map[string]interface{}, error)
+
+	// ExecWithConnection is the exec method with given connection of sql.
 	ExecWithConnection(conn, query string, args ...interface{}) (sql.Result, error)
-	InitDB(cfg map[string]config.Database)
-	GetName() string
+
+	QueryWithTx(tx *sql.Tx, query string, args ...interface{}) ([]map[string]interface{}, error)
+
+	ExecWithTx(tx *sql.Tx, query string, args ...interface{}) (sql.Result, error)
+
+	BeginTxWithReadUncommitted() *sql.Tx
+	BeginTxWithReadCommitted() *sql.Tx
+	BeginTxWithRepeatableRead() *sql.Tx
+	BeginTx() *sql.Tx
+	BeginTxWithLevel(level sql.IsolationLevel) *sql.Tx
+
+	BeginTxWithReadUncommittedAndConnection(conn string) *sql.Tx
+	BeginTxWithReadCommittedAndConnection(conn string) *sql.Tx
+	BeginTxWithRepeatableReadAndConnection(conn string) *sql.Tx
+	BeginTxAndConnection(conn string) *sql.Tx
+	BeginTxWithLevelAndConnection(conn string, level sql.IsolationLevel) *sql.Tx
+
+	// InitDB initialize the database connections.
+	InitDB(cfg map[string]config.Database) Connection
+
+	// GetName get the connection name.
+	Name() string
+
+	Close() []error
+
+	// GetDelimiter get the default testDelimiter.
 	GetDelimiter() string
+
+	GetDB(key string) *sql.DB
 }
 
+// GetConnectionByDriver return the Connection by given driver name.
 func GetConnectionByDriver(driver string) Connection {
 	switch driver {
 	case "mysql":
@@ -41,14 +82,29 @@ func GetConnectionByDriver(driver string) Connection {
 	}
 }
 
-func GetConnection() Connection {
-	return GetConnectionByDriver(config.Get().Databases.GetDefault().Driver)
+func GetConnectionFromService(srv interface{}) Connection {
+	if v, ok := srv.(Connection); ok {
+		return v
+	}
+	panic("wrong service")
 }
 
-func Query(query string, args ...interface{}) ([]map[string]interface{}, error) {
-	return GetConnection().Query(query, args...)
+func GetConnection(srvs service.List) Connection {
+	if v, ok := srvs.Get(config.Get().Databases.GetDefault().Driver).(Connection); ok {
+		return v
+	}
+	panic("wrong service")
 }
 
-func Exec(query string, args ...interface{}) (sql.Result, error) {
-	return GetConnection().Exec(query, args...)
+func GetAggregationExpression(driver, field, headField, delimiter string) string {
+	switch driver {
+	case "postgresql":
+		return fmt.Sprintf("string_agg(%s::character varying, '%s') as %s", field, delimiter, headField)
+	case "mysql":
+		return fmt.Sprintf("group_concat(%s separator '%s') as %s", field, delimiter, headField)
+	case "sqlite":
+		return fmt.Sprintf("group_concat(%s, '%s') as %s", field, delimiter, headField)
+	default:
+		panic("wrong driver")
+	}
 }

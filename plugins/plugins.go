@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/logger"
+	"github.com/GoAdminGroup/go-admin/modules/service"
 	"plugin"
 )
 
@@ -18,22 +19,12 @@ import (
 // something like init the database and set the config and register
 // the routes. The Plugin must implement the three methods.
 type Plugin interface {
-	GetRequest() []context.Path
-	GetHandler(url, method string) context.Handlers
-	InitPlugin()
+	GetHandler() context.HandlerMap
+	InitPlugin(services service.List)
 }
 
 // GetHandler is a help method for Plugin GetHandler.
-func GetHandler(url, method string, app *context.App) context.Handlers {
-
-	handler := app.Find(url, method)
-
-	if len(handler) == 0 {
-		panic("handler not found")
-	}
-
-	return handler
-}
+func GetHandler(app *context.App) context.HandlerMap { return app.Handlers }
 
 func LoadFromPlugin(mod string) Plugin {
 

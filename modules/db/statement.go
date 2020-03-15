@@ -1,29 +1,36 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
 package db
 
 import (
+	dbsql "database/sql"
 	"errors"
-	"github.com/GoAdminGroup/go-admin/modules/db/dialect"
-	"github.com/GoAdminGroup/go-admin/modules/logger"
+	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/GoAdminGroup/go-admin/modules/db/dialect"
+	"github.com/GoAdminGroup/go-admin/modules/logger"
 )
 
-type Sql struct {
-	dialect.SqlComponent
+// SQL wraps the Connection and driver dialect methods.
+type SQL struct {
+	dialect.SQLComponent
 	diver   Connection
 	dialect dialect.Dialect
 	conn    string
+	tx      *dbsql.Tx
 }
 
-var SqlPool = sync.Pool{
+// SQLPool is a object pool of SQL.
+var SQLPool = sync.Pool{
 	New: func() interface{} {
-		return &Sql{
-			SqlComponent: dialect.SqlComponent{
+		return &SQL{
+			SQLComponent: dialect.SQLComponent{
 				Fields:     make([]string, 0),
 				TableName:  "",
 				Args:       make([]interface{}, 0),
@@ -31,6 +38,9 @@ var SqlPool = sync.Pool{
 				Leftjoins:  make([]dialect.Join, 0),
 				UpdateRaws: make([]dialect.RawUpdate, 0),
 				WhereRaws:  "",
+				Order:      "",
+				Group:      "",
+				Limit:      "",
 			},
 			diver:   nil,
 			dialect: nil,
@@ -38,81 +48,144 @@ var SqlPool = sync.Pool{
 	},
 }
 
+// H is a shorthand of map.
 type H map[string]interface{}
 
-func newSql() *Sql {
-	return SqlPool.Get().(*Sql)
+// newSQL get a new SQL from SQLPool.
+func newSQL() *SQL {
+	return SQLPool.Get().(*SQL)
 }
 
 // *******************************
 // process method
 // *******************************
 
-func Table(table string) *Sql {
-	sql := newSql()
+// TableName return a SQL with given table and default connection.
+func Table(table string) *SQL {
+	sql := newSQL()
 	sql.TableName = table
-	sql.diver = GetConnection()
-	sql.dialect = dialect.GetDialect()
 	sql.conn = "default"
 	return sql
 }
 
-func WithDriver(driver string) *Sql {
-	sql := newSql()
-	sql.diver = GetConnectionByDriver(driver)
-	sql.dialect = dialect.GetDialectByDriver(driver)
+// WithDriver return a SQL with given driver.
+func WithDriver(conn Connection) *SQL {
+	sql := newSQL()
+	sql.diver = conn
+	sql.dialect = dialect.GetDialectByDriver(conn.Name())
 	sql.conn = "default"
 	return sql
 }
 
-func WithDriverAndConnection(conn, driver string) *Sql {
-	sql := newSql()
-	sql.diver = GetConnectionByDriver(driver)
-	sql.dialect = dialect.GetDialectByDriver(driver)
+// WithDriverAndConnection return a SQL with given driver and connection name.
+func WithDriverAndConnection(connName string, conn Connection) *SQL {
+	sql := newSQL()
+	sql.diver = conn
+	sql.dialect = dialect.GetDialectByDriver(conn.Name())
+	sql.conn = connName
+	return sql
+}
+
+// WithDriver return a SQL with given driver.
+func (sql *SQL) WithDriver(conn Connection) *SQL {
+	sql.diver = conn
+	sql.dialect = dialect.GetDialectByDriver(conn.Name())
+	return sql
+}
+
+// WithConnection set the connection name of SQL.
+func (sql *SQL) WithConnection(conn string) *SQL {
 	sql.conn = conn
 	return sql
 }
 
-func (sql *Sql) WithConnection(conn string) *Sql {
-	sql.conn = conn
+// WithTx set the database transaction object of SQL.
+func (sql *SQL) WithTx(tx *dbsql.Tx) *SQL {
+	sql.tx = tx
 	return sql
 }
 
-func (sql *Sql) Table(table string) *Sql {
+// TableName set table of SQL.
+func (sql *SQL) Table(table string) *SQL {
+	sql.clean()
 	sql.TableName = table
 	return sql
 }
 
-func (sql *Sql) Select(fields ...string) *Sql {
+// Select set select fields.
+func (sql *SQL) Select(fields ...string) *SQL {
 	sql.Fields = fields
+	sql.Functions = make([]string, len(fields))
+	reg, _ := regexp.Compile("(.*?)\\((.*?)\\)")
+	for k, field := range fields {
+		res := reg.FindAllStringSubmatch(field, -1)
+		if len(res) > 0 && len(res[0]) > 2 {
+			sql.Functions[k] = res[0][1]
+			sql.Fields[k] = res[0][2]
+		}
+	}
 	return sql
 }
 
-func (sql *Sql) OrderBy(fields ...string) *Sql {
+// OrderBy set order fields.
+func (sql *SQL) OrderBy(fields ...string) *SQL {
 	if len(fields) == 0 {
 		panic("wrong order field")
 	}
 	for i := 0; i < len(fields); i++ {
 		if i == len(fields)-2 {
-			sql.Order += " " + sql.filed(fields[i]) + " " + fields[i+1]
+			sql.Order += " " + sql.wrap(fields[i]) + " " + fields[i+1]
 			return sql
 		}
-		sql.Order += " " + sql.filed(fields[i]) + " and "
+		sql.Order += " " + sql.wrap(fields[i]) + " and "
 	}
 	return sql
 }
 
-func (sql *Sql) Skip(offset int) *Sql {
+// OrderByRaw set order by.
+func (sql *SQL) OrderByRaw(order string) *SQL {
+	if order != "" {
+		sql.Order += " " + order
+	}
+	return sql
+}
+
+func (sql *SQL) GroupBy(fields ...string) *SQL {
+	if len(fields) == 0 {
+		panic("wrong group by field")
+	}
+	for i := 0; i < len(fields); i++ {
+		if i == len(fields)-2 {
+			sql.Group += " " + sql.wrap(fields[i]) + " " + fields[i+1]
+			return sql
+		}
+		sql.Group += " " + sql.wrap(fields[i]) + " and "
+	}
+	return sql
+}
+
+// GroupByRaw set group by.
+func (sql *SQL) GroupByRaw(group string) *SQL {
+	if group != "" {
+		sql.Group += " " + group
+	}
+	return sql
+}
+
+// Skip set offset value.
+func (sql *SQL) Skip(offset int) *SQL {
 	sql.Offset = strconv.Itoa(offset)
 	return sql
 }
 
-func (sql *Sql) Take(take int) *Sql {
+// Take set limit value.
+func (sql *SQL) Take(take int) *SQL {
 	sql.Limit = strconv.Itoa(take)
 	return sql
 }
 
-func (sql *Sql) Where(field string, operation string, arg interface{}) *Sql {
+// Where add the where operation and argument value.
+func (sql *SQL) Where(field string, operation string, arg interface{}) *SQL {
 	sql.Wheres = append(sql.Wheres, dialect.Where{
 		Field:     field,
 		Operation: operation,
@@ -122,9 +195,10 @@ func (sql *Sql) Where(field string, operation string, arg interface{}) *Sql {
 	return sql
 }
 
-func (sql *Sql) WhereIn(field string, arg []interface{}) *Sql {
+// WhereIn add the where operation of "in" and argument values.
+func (sql *SQL) WhereIn(field string, arg []interface{}) *SQL {
 	if len(arg) == 0 {
-		return sql
+		panic("wrong parameter")
 	}
 	sql.Wheres = append(sql.Wheres, dialect.Where{
 		Field:     field,
@@ -135,9 +209,10 @@ func (sql *Sql) WhereIn(field string, arg []interface{}) *Sql {
 	return sql
 }
 
-func (sql *Sql) WhereNotIn(field string, arg []interface{}) *Sql {
+// WhereNotIn add the where operation of "not in" and argument values.
+func (sql *SQL) WhereNotIn(field string, arg []interface{}) *SQL {
 	if len(arg) == 0 {
-		return sql
+		panic("wrong parameter")
 	}
 	sql.Wheres = append(sql.Wheres, dialect.Where{
 		Field:     field,
@@ -148,28 +223,119 @@ func (sql *Sql) WhereNotIn(field string, arg []interface{}) *Sql {
 	return sql
 }
 
-func (sql *Sql) Find(arg interface{}) (map[string]interface{}, error) {
+// Find query the sql result with given id assuming that primary key name is "id".
+func (sql *SQL) Find(arg interface{}) (map[string]interface{}, error) {
 	return sql.Where("id", "=", arg).First()
 }
 
-func (sql *Sql) Count() (int64, error) {
+// Count query the count of query results.
+func (sql *SQL) Count() (int64, error) {
 	var (
-		res map[string]interface{}
-		err error
+		res    map[string]interface{}
+		err    error
+		driver = sql.diver.Name()
 	)
+
 	if res, err = sql.Select("count(*)").First(); err != nil {
 		return 0, err
 	}
+
+	if driver == DriverPostgresql {
+		return res["count"].(int64), nil
+	} else if driver == DriverMssql {
+		return res[""].(int64), nil
+	}
+
 	return res["count(*)"].(int64), nil
 }
 
-func (sql *Sql) WhereRaw(raw string, args ...interface{}) *Sql {
+// Sum sum the value of given field.
+func (sql *SQL) Sum(field string) (float64, error) {
+	var (
+		res map[string]interface{}
+		err error
+		key = "sum(" + sql.wrap(field) + ")"
+	)
+	if res, err = sql.Select("sum(" + field + ")").First(); err != nil {
+		return 0, err
+	}
+
+	if res == nil {
+		return 0, nil
+	}
+
+	if r, ok := res[key].(float64); ok {
+		return r, nil
+	} else if r, ok := res[key].([]uint8); ok {
+		return strconv.ParseFloat(string(r), 64)
+	} else {
+		return 0, nil
+	}
+}
+
+// Max find the maximal value of given field.
+func (sql *SQL) Max(field string) (interface{}, error) {
+	var (
+		res map[string]interface{}
+		err error
+		key = "max(" + sql.wrap(field) + ")"
+	)
+	if res, err = sql.Select("max(" + field + ")").First(); err != nil {
+		return 0, err
+	}
+
+	if res == nil {
+		return 0, nil
+	}
+
+	return res[key], nil
+}
+
+// Min find the minimal value of given field.
+func (sql *SQL) Min(field string) (interface{}, error) {
+	var (
+		res map[string]interface{}
+		err error
+		key = "min(" + sql.wrap(field) + ")"
+	)
+	if res, err = sql.Select("min(" + field + ")").First(); err != nil {
+		return 0, err
+	}
+
+	if res == nil {
+		return 0, nil
+	}
+
+	return res[key], nil
+}
+
+// Avg find the average value of given field.
+func (sql *SQL) Avg(field string) (interface{}, error) {
+	var (
+		res map[string]interface{}
+		err error
+		key = "avg(" + sql.wrap(field) + ")"
+	)
+	if res, err = sql.Select("avg(" + field + ")").First(); err != nil {
+		return 0, err
+	}
+
+	if res == nil {
+		return 0, nil
+	}
+
+	return res[key], nil
+}
+
+// WhereRaw set WhereRaws and arguments.
+func (sql *SQL) WhereRaw(raw string, args ...interface{}) *SQL {
 	sql.WhereRaws = raw
 	sql.Args = append(sql.Args, args...)
 	return sql
 }
 
-func (sql *Sql) UpdateRaw(raw string, args ...interface{}) *Sql {
+// UpdateRaw set UpdateRaw.
+func (sql *SQL) UpdateRaw(raw string, args ...interface{}) *SQL {
 	sql.UpdateRaws = append(sql.UpdateRaws, dialect.RawUpdate{
 		Expression: raw,
 		Args:       args,
@@ -177,7 +343,8 @@ func (sql *Sql) UpdateRaw(raw string, args ...interface{}) *Sql {
 	return sql
 }
 
-func (sql *Sql) LeftJoin(table string, fieldA string, operation string, fieldB string) *Sql {
+// LeftJoin add a left join info.
+func (sql *SQL) LeftJoin(table string, fieldA string, operation string, fieldB string) *SQL {
 	sql.Leftjoins = append(sql.Leftjoins, dialect.Join{
 		FieldA:    fieldA,
 		FieldB:    fieldB,
@@ -188,18 +355,83 @@ func (sql *Sql) LeftJoin(table string, fieldA string, operation string, fieldB s
 }
 
 // *******************************
+// Transaction method
+// *******************************
+
+// TxFn is the transaction callback function.
+type TxFn func(tx *dbsql.Tx) (error, map[string]interface{})
+
+// WithTransaction call the callback function within the transaction and
+// catch the error.
+func (sql *SQL) WithTransaction(fn TxFn) (res map[string]interface{}, err error) {
+
+	tx := sql.diver.BeginTxAndConnection(sql.conn)
+
+	defer func() {
+		if p := recover(); p != nil {
+			// a panic occurred, rollback and repanic
+			_ = tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			// something went wrong, rollback
+			_ = tx.Rollback()
+		} else {
+			// all good, commit
+			err = tx.Commit()
+		}
+	}()
+
+	err, res = fn(tx)
+	return
+}
+
+// WithTransactionByLevel call the callback function within the transaction
+// of given transaction level and catch the error.
+func (sql *SQL) WithTransactionByLevel(level dbsql.IsolationLevel, fn TxFn) (res map[string]interface{}, err error) {
+
+	tx := sql.diver.BeginTxWithLevelAndConnection(sql.conn, level)
+
+	defer func() {
+		if p := recover(); p != nil {
+			// a panic occurred, rollback and repanic
+			_ = tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			// something went wrong, rollback
+			_ = tx.Rollback()
+		} else {
+			// all good, commit
+			err = tx.Commit()
+		}
+	}()
+
+	err, res = fn(tx)
+	return
+}
+
+// *******************************
 // terminal method
 // -------------------------------
 // sql args order:
 // update ... => where ...
 // *******************************
 
-func (sql *Sql) First() (map[string]interface{}, error) {
-	defer RecycleSql(sql)
+// First query the result and return the first row.
+func (sql *SQL) First() (map[string]interface{}, error) {
+	defer RecycleSQL(sql)
 
-	sql.dialect.Select(&sql.SqlComponent)
+	sql.dialect.Select(&sql.SQLComponent)
 
-	res, err := sql.diver.QueryWithConnection(sql.conn, sql.Statement, sql.Args...)
+	var (
+		res []map[string]interface{}
+		err error
+	)
+
+	if sql.tx != nil {
+		res, err = sql.diver.QueryWithTx(sql.tx, sql.Statement, sql.Args...)
+	} else {
+		res, err = sql.diver.QueryWithConnection(sql.conn, sql.Statement, sql.Args...)
+	}
 
 	if err != nil {
 		return nil, err
@@ -211,34 +443,50 @@ func (sql *Sql) First() (map[string]interface{}, error) {
 	return res[0], nil
 }
 
-func (sql *Sql) All() ([]map[string]interface{}, error) {
-	defer RecycleSql(sql)
+// All query all the result and return.
+func (sql *SQL) All() ([]map[string]interface{}, error) {
+	defer RecycleSQL(sql)
 
-	sql.dialect.Select(&sql.SqlComponent)
+	sql.dialect.Select(&sql.SQLComponent)
 
+	if sql.tx != nil {
+		return sql.diver.QueryWithTx(sql.tx, sql.Statement, sql.Args...)
+	}
 	return sql.diver.QueryWithConnection(sql.conn, sql.Statement, sql.Args...)
 }
 
-func (sql *Sql) ShowColumns() ([]map[string]interface{}, error) {
-	defer RecycleSql(sql)
+// ShowColumns show columns info.
+func (sql *SQL) ShowColumns() ([]map[string]interface{}, error) {
+	defer RecycleSQL(sql)
 
 	return sql.diver.QueryWithConnection(sql.conn, sql.dialect.ShowColumns(sql.TableName))
 }
 
-func (sql *Sql) ShowTables() ([]map[string]interface{}, error) {
-	defer RecycleSql(sql)
+// ShowTables show table info.
+func (sql *SQL) ShowTables() ([]map[string]interface{}, error) {
+	defer RecycleSQL(sql)
 
 	return sql.diver.QueryWithConnection(sql.conn, sql.dialect.ShowTables())
 }
 
-func (sql *Sql) Update(values dialect.H) (int64, error) {
-	defer RecycleSql(sql)
+// Update exec the update method of given key/value pairs.
+func (sql *SQL) Update(values dialect.H) (int64, error) {
+	defer RecycleSQL(sql)
 
 	sql.Values = values
 
-	sql.dialect.Update(&sql.SqlComponent)
+	sql.dialect.Update(&sql.SQLComponent)
 
-	res, err := sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	var (
+		res dbsql.Result
+		err error
+	)
+
+	if sql.tx != nil {
+		res, err = sql.diver.ExecWithTx(sql.tx, sql.Statement, sql.Args...)
+	} else {
+		res, err = sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	}
 
 	if err != nil {
 		return 0, err
@@ -251,12 +499,22 @@ func (sql *Sql) Update(values dialect.H) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (sql *Sql) Delete() error {
-	defer RecycleSql(sql)
+// Delete exec the delete method.
+func (sql *SQL) Delete() error {
+	defer RecycleSQL(sql)
 
-	sql.dialect.Delete(&sql.SqlComponent)
+	sql.dialect.Delete(&sql.SQLComponent)
 
-	res, err := sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	var (
+		res dbsql.Result
+		err error
+	)
+
+	if sql.tx != nil {
+		res, err = sql.diver.ExecWithTx(sql.tx, sql.Statement, sql.Args...)
+	} else {
+		res, err = sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	}
 
 	if err != nil {
 		return err
@@ -269,12 +527,22 @@ func (sql *Sql) Delete() error {
 	return nil
 }
 
-func (sql *Sql) Exec() (int64, error) {
-	defer RecycleSql(sql)
+// Exec exec the exec method.
+func (sql *SQL) Exec() (int64, error) {
+	defer RecycleSQL(sql)
 
-	sql.dialect.Update(&sql.SqlComponent)
+	sql.dialect.Update(&sql.SQLComponent)
 
-	res, err := sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	var (
+		res dbsql.Result
+		err error
+	)
+
+	if sql.tx != nil {
+		res, err = sql.diver.ExecWithTx(sql.tx, sql.Statement, sql.Args...)
+	} else {
+		res, err = sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	}
 
 	if err != nil {
 		return 0, err
@@ -287,32 +555,48 @@ func (sql *Sql) Exec() (int64, error) {
 	return res.LastInsertId()
 }
 
-func (sql *Sql) Insert(values dialect.H) (int64, error) {
-	defer RecycleSql(sql)
+// Insert exec the insert method of given key/value pairs.
+func (sql *SQL) Insert(values dialect.H) (int64, error) {
+	defer RecycleSQL(sql)
 
 	sql.Values = values
 
-	sql.dialect.Insert(&sql.SqlComponent)
+	sql.dialect.Insert(&sql.SQLComponent)
 
-	if sql.diver.GetName() == DriverPostgresql {
+	var (
+		res    dbsql.Result
+		err    error
+		resMap []map[string]interface{}
+	)
+
+	if sql.diver.Name() == DriverPostgresql {
 		if sql.TableName == "goadmin_menu" ||
 			sql.TableName == "goadmin_permissions" ||
 			sql.TableName == "goadmin_roles" ||
 			sql.TableName == "goadmin_users" {
-			res, err := sql.diver.QueryWithConnection(sql.conn, sql.Statement+" RETURNING id", sql.Args...)
+
+			if sql.tx != nil {
+				resMap, err = sql.diver.QueryWithTx(sql.tx, sql.Statement+" RETURNING id", sql.Args...)
+			} else {
+				resMap, err = sql.diver.QueryWithConnection(sql.conn, sql.Statement+" RETURNING id", sql.Args...)
+			}
 
 			if err != nil {
 				return 0, err
 			}
 
-			if len(res) == 0 {
+			if len(resMap) == 0 {
 				return 0, errors.New("no affect row")
 			}
-			return res[0]["id"].(int64), nil
+			return resMap[0]["id"].(int64), nil
 		}
 	}
 
-	res, err := sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	if sql.tx != nil {
+		res, err = sql.diver.ExecWithTx(sql.tx, sql.Statement, sql.Args...)
+	} else {
+		res, err = sql.diver.ExecWithConnection(sql.conn, sql.Statement, sql.Args...)
+	}
 
 	if err != nil {
 		return 0, err
@@ -325,14 +609,17 @@ func (sql *Sql) Insert(values dialect.H) (int64, error) {
 	return res.LastInsertId()
 }
 
-func (sql *Sql) filed(filed string) string {
-	return sql.diver.GetDelimiter() + filed + sql.diver.GetDelimiter()
+func (sql *SQL) wrap(field string) string {
+	if sql.diver.Name() == "mssql" {
+		return fmt.Sprintf(`[%s]`, field)
+	}
+	return sql.diver.GetDelimiter() + field + sql.diver.GetDelimiter()
 }
 
-func RecycleSql(sql *Sql) {
-
-	logger.LogSql(sql.Statement, sql.Args)
-
+func (sql *SQL) clean() {
+	sql.Functions = make([]string, 0)
+	sql.Group = ""
+	sql.Values = make(map[string]interface{})
 	sql.Fields = make([]string, 0)
 	sql.TableName = ""
 	sql.Wheres = make([]dialect.Where, 0)
@@ -344,6 +631,19 @@ func RecycleSql(sql *Sql) {
 	sql.WhereRaws = ""
 	sql.UpdateRaws = make([]dialect.RawUpdate, 0)
 	sql.Statement = ""
+}
 
-	SqlPool.Put(sql)
+// RecycleSQL clear the SQL and put into the pool.
+func RecycleSQL(sql *SQL) {
+
+	logger.LogSQL(sql.Statement, sql.Args)
+
+	sql.clean()
+
+	sql.conn = ""
+	sql.diver = nil
+	sql.tx = nil
+	sql.dialect = nil
+
+	SQLPool.Put(sql)
 }

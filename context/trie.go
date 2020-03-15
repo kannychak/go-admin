@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -9,16 +9,30 @@ import "fmt"
 type node struct {
 	children []*node
 	value    string
-	method   string
-	handle   []Handler
+	method   []string
+	handle   [][]Handler
 }
 
-func Tree() *node {
+func tree() *node {
 	return &node{
 		children: make([]*node, 0),
 		value:    "/",
 		handle:   nil,
 	}
+}
+
+func (n *node) hasMethod(method string) int {
+	for k, m := range n.method {
+		if m == method {
+			return k
+		}
+	}
+	return -1
+}
+
+func (n *node) addMethodAndHandler(method string, handler []Handler) {
+	n.method = append(n.method, method)
+	n.handle = append(n.handle, handler)
 }
 
 func (n *node) addChild(child *node) {
@@ -47,45 +61,47 @@ func (n *node) search(value string) *node {
 }
 
 func (n *node) addPath(paths []string, method string, handler []Handler) {
-	if len(paths) > 0 {
-		child := n.addContent(paths[0])
-		if len(paths) > 1 {
-			child.addPath(paths[1:], method, handler)
-		} else {
-			child.method = method
-			child.handle = handler
-		}
+	child := n
+	for i := 0; i < len(paths); i++ {
+		child = child.addContent(paths[i])
 	}
+	child.addMethodAndHandler(method, handler)
 }
 
 func (n *node) findPath(paths []string, method string) []Handler {
-	if len(paths) > 0 {
-		child := n.search(paths[0])
+	child := n
+	for i := 0; i < len(paths); i++ {
+		child = child.search(paths[i])
 		if child == nil {
 			return nil
-		} else {
-			if len(paths) > 1 {
-				return child.findPath(paths[1:], method)
-			} else {
-				if child.method != method {
-					return nil
-				} else {
-					return child.handle
-				}
-			}
 		}
 	}
-	return nil
+
+	methodIndex := child.hasMethod(method)
+	if methodIndex == -1 {
+		return nil
+	}
+
+	return child.handle[methodIndex]
 }
 
 func (n *node) print() {
-	fmt.Println(n.value)
+	fmt.Println(n)
 }
 
 func (n *node) printChildren() {
 	n.print()
 	for _, child := range n.children {
 		child.printChildren()
+	}
+}
+
+func (n *node) printLeafChildren() {
+	if len(n.handle) > 0 {
+		n.print()
+	}
+	for _, child := range n.children {
+		child.printLeafChildren()
 	}
 }
 

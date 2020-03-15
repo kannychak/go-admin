@@ -1,32 +1,38 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
 package auth
 
 import (
-	"fmt"
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/modules/db"
 	"github.com/GoAdminGroup/go-admin/modules/language"
 	"github.com/GoAdminGroup/go-admin/modules/page"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/models"
 	template2 "github.com/GoAdminGroup/go-admin/template"
 	"github.com/GoAdminGroup/go-admin/template/types"
 	"html/template"
-	"regexp"
-	"strings"
+	"net/url"
 )
 
+// Invoker contains the callback functions which are used
+// in the route middleware.
 type Invoker struct {
 	prefix                 string
 	authFailCallback       MiddlewareCallback
 	permissionDenyCallback MiddlewareCallback
+	conn                   db.Connection
 }
 
-var Middleware = DefaultInvoker().Middleware()
+// Middleware is the default auth middleware of plugins.
+func Middleware(conn db.Connection) context.Handler {
+	return DefaultInvoker(conn).Middleware()
+}
 
-func DefaultInvoker() *Invoker {
+// DefaultInvoker return a default Invoker.
+func DefaultInvoker(conn db.Connection) *Invoker {
 	return &Invoker{
 		prefix: config.Get().Prefix(),
 		authFailCallback: func(ctx *context.Context) {
@@ -45,32 +51,38 @@ func DefaultInvoker() *Invoker {
 					Description: "Error",
 					Title:       "Error",
 				}, nil
-			})
+			}, conn)
 		},
+		conn: conn,
 	}
 }
 
-func SetPrefix(prefix string) *Invoker {
-	i := DefaultInvoker()
+// SetPrefix return the default Invoker with the given prefix.
+func SetPrefix(prefix string, conn db.Connection) *Invoker {
+	i := DefaultInvoker(conn)
 	i.prefix = prefix
 	return i
 }
 
+// SetAuthFailCallback set the authFailCallback of Invoker.
 func (invoker *Invoker) SetAuthFailCallback(callback MiddlewareCallback) *Invoker {
 	invoker.authFailCallback = callback
 	return invoker
 }
 
+// SetPermissionDenyCallback set the permissionDenyCallback of Invoker.
 func (invoker *Invoker) SetPermissionDenyCallback(callback MiddlewareCallback) *Invoker {
 	invoker.permissionDenyCallback = callback
 	return invoker
 }
 
+// MiddlewareCallback is type of callback function.
 type MiddlewareCallback func(ctx *context.Context)
 
+// Middleware get the auth middleware from Invoker.
 func (invoker *Invoker) Middleware() context.Handler {
 	return func(ctx *context.Context) {
-		user, authOk, permissionOk := Filter(ctx)
+		user, authOk, permissionOk := Filter(ctx, invoker.conn)
 
 		if authOk && permissionOk {
 			ctx.SetUserValue("user", user)
@@ -93,29 +105,59 @@ func (invoker *Invoker) Middleware() context.Handler {
 	}
 }
 
-func Filter(ctx *context.Context) (models.UserModel, bool, bool) {
+// Filter retrieve the user model from Context and check the permission
+// at the same time.
+func Filter(ctx *context.Context, conn db.Connection) (models.UserModel, bool, bool) {
 	var (
 		id   float64
 		ok   bool
 		user = models.User()
 	)
 
-	if id, ok = InitSession(ctx).Get("user_id").(float64); !ok {
+	if id, ok = InitSession(ctx, conn).Get("user_id").(float64); !ok {
 		return user, false, false
 	}
 
-	user, ok = GetCurUserById(int64(id))
+	user, ok = GetCurUserByID(int64(id), conn)
 
 	if !ok {
 		return user, false, false
 	}
 
-	return user, true, CheckPermissions(user, ctx.Path(), ctx.Method())
+	return user, true, CheckPermissions(user, ctx.Request.URL.String(), ctx.Method(), ctx.PostForm())
 }
 
-func GetCurUserById(id int64) (user models.UserModel, ok bool) {
+const defaultUserIDSesKey = "user_id"
 
-	user = models.User().Find(id)
+// GetUserID return the user id from the session.
+func GetUserID(sesKey string, conn db.Connection) int64 {
+	id := GetSessionByKey(sesKey, defaultUserIDSesKey, conn)
+	if idFloat64, ok := id.(float64); ok {
+		return int64(idFloat64)
+	}
+	return -1
+}
+
+// GetCurUser return the user model.
+func GetCurUser(sesKey string, conn db.Connection) (user models.UserModel, ok bool) {
+
+	if sesKey == "" {
+		ok = false
+		return
+	}
+
+	id := GetUserID(sesKey, conn)
+	if id == -1 {
+		ok = false
+		return
+	}
+	return GetCurUserByID(id, conn)
+}
+
+// GetCurUserByID return the user model of given user id.
+func GetCurUserByID(id int64, conn db.Connection) (user models.UserModel, ok bool) {
+
+	user = models.User().SetConn(conn).Find(id)
 
 	if user.IsEmpty() {
 		ok = false
@@ -125,60 +167,17 @@ func GetCurUserById(id int64) (user models.UserModel, ok bool) {
 	if user.Avatar == "" || config.Get().Store.Prefix == "" {
 		user.Avatar = ""
 	} else {
-		user.Avatar = "/" + config.Get().Store.Prefix + "/" + user.Avatar
+		user.Avatar = config.Get().Store.URL(user.Avatar)
 	}
 
 	user = user.WithRoles().WithPermissions().WithMenus()
 
-	ok = true
+	ok = user.HasMenu()
 
 	return
 }
 
-func CheckPermissions(user models.UserModel, path string, method string) bool {
-
-	if path == config.Get().Url("/logout") {
-		return true
-	}
-
-	for _, v := range user.Permissions {
-
-		if v.HttpMethod[0] == "" || InMethodArr(v.HttpMethod, method) {
-
-			if v.HttpPath[0] == "*" {
-				return true
-			}
-
-			for i := 0; i < len(v.HttpPath); i++ {
-
-				matchPath := config.Get().Url(strings.TrimSpace(v.HttpPath[i]))
-
-				if matchPath == path {
-					return true
-				}
-
-				reg, err := regexp.Compile(matchPath)
-
-				if err != nil {
-					fmt.Println("err", err)
-					continue
-				}
-
-				if reg.FindString(path) == path {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-func InMethodArr(arr []string, str string) bool {
-	for i := 0; i < len(arr); i++ {
-		if strings.EqualFold(arr[i], str) {
-			return true
-		}
-	}
-	return false
+// CheckPermissions check the permission of the user.
+func CheckPermissions(user models.UserModel, path, method string, param url.Values) bool {
+	return user.CheckPermissionByUrlMethod(path, method, param)
 }

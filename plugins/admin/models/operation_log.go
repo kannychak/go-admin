@@ -5,6 +5,7 @@ import (
 	"github.com/GoAdminGroup/go-admin/modules/db/dialect"
 )
 
+// OperationLogModel is operation log model structure.
 type OperationLogModel struct {
 	Base
 
@@ -18,18 +19,26 @@ type OperationLogModel struct {
 	UpdatedAt string
 }
 
+// OperationLog return a default operation log model.
 func OperationLog() OperationLogModel {
-	return OperationLogModel{Base: Base{Table: "goadmin_operation_log"}}
+	return OperationLogModel{Base: Base{TableName: "goadmin_operation_log"}}
 }
 
+// Find return a default operation log model of given id.
 func (t OperationLogModel) Find(id interface{}) OperationLogModel {
-	item, _ := db.Table(t.Table).Find(id)
+	item, _ := t.Table(t.TableName).Find(id)
 	return t.MapToModel(item)
 }
 
+func (t OperationLogModel) SetConn(con db.Connection) OperationLogModel {
+	t.Conn = con
+	return t
+}
+
+// New create a new operation log model.
 func (t OperationLogModel) New(userId int64, path, method, ip, input string) OperationLogModel {
 
-	id, _ := db.Table(t.Table).Insert(dialect.H{
+	id, _ := t.Table(t.TableName).Insert(dialect.H{
 		"user_id": userId,
 		"path":    path,
 		"method":  method,
@@ -47,6 +56,7 @@ func (t OperationLogModel) New(userId int64, path, method, ip, input string) Ope
 	return t
 }
 
+// MapToModel get the operation log model from given map.
 func (t OperationLogModel) MapToModel(m map[string]interface{}) OperationLogModel {
 	t.Id = m["id"].(int64)
 	t.UserId = m["user_id"].(int64)

@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -7,143 +7,138 @@ package gin
 import (
 	"bytes"
 	"errors"
+	"github.com/GoAdminGroup/go-admin/adapter"
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/engine"
-	"github.com/GoAdminGroup/go-admin/modules/auth"
 	"github.com/GoAdminGroup/go-admin/modules/config"
-	"github.com/GoAdminGroup/go-admin/modules/language"
-	"github.com/GoAdminGroup/go-admin/modules/logger"
-	"github.com/GoAdminGroup/go-admin/modules/menu"
 	"github.com/GoAdminGroup/go-admin/plugins"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/models"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/constant"
-	"github.com/GoAdminGroup/go-admin/template"
 	"github.com/GoAdminGroup/go-admin/template/types"
 	"github.com/gin-gonic/gin"
-	template2 "html/template"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
+// Gin structure value is a Gin GoAdmin adapter.
 type Gin struct {
+	adapter.BaseAdapter
+	ctx *gin.Context
+	app *gin.Engine
 }
 
 func init() {
 	engine.Register(new(Gin))
 }
 
-func (gins *Gin) Use(router interface{}, plugin []plugins.Plugin) error {
+func (gins *Gin) User(ci interface{}) (models.UserModel, bool) {
+	return gins.GetUser(ci, gins)
+}
+
+func (gins *Gin) Use(router interface{}, plugs []plugins.Plugin) error {
+	return gins.GetUse(router, plugs, gins)
+}
+
+func (gins *Gin) Content(ctx interface{}, getPanelFn types.GetPanelFn) {
+	gins.GetContent(ctx, getPanelFn, gins)
+}
+
+type HandlerFunc func(ctx *gin.Context) (types.Panel, error)
+
+func Content(handler HandlerFunc) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		engine.Content(ctx, func(ctx interface{}) (types.Panel, error) {
+			return handler(ctx.(*gin.Context))
+		})
+	}
+}
+
+func (gins *Gin) SetApp(app interface{}) error {
 	var (
 		eng *gin.Engine
 		ok  bool
 	)
-	if eng, ok = router.(*gin.Engine); !ok {
+	if eng, ok = app.(*gin.Engine); !ok {
 		return errors.New("wrong parameter")
 	}
-
-	for _, plug := range plugin {
-		var plugCopy = plug
-		for _, req := range plug.GetRequest() {
-			eng.Handle(strings.ToUpper(req.Method), req.URL, func(c *gin.Context) {
-				ctx := context.NewContext(c.Request)
-
-				for _, param := range c.Params {
-					if c.Request.URL.RawQuery == "" {
-						c.Request.URL.RawQuery += strings.Replace(param.Key, ":", "", -1) + "=" + param.Value
-					} else {
-						c.Request.URL.RawQuery += "&" + strings.Replace(param.Key, ":", "", -1) + "=" + param.Value
-					}
-				}
-
-				ctx.SetHandlers(plugCopy.GetHandler(c.Request.URL.Path, strings.ToLower(c.Request.Method))).Next()
-				for key, head := range ctx.Response.Header {
-					c.Header(key, head[0])
-				}
-				if ctx.Response.Body != nil {
-					buf := new(bytes.Buffer)
-					_, _ = buf.ReadFrom(ctx.Response.Body)
-					c.String(ctx.Response.StatusCode, buf.String())
-				} else {
-					c.Status(ctx.Response.StatusCode)
-				}
-			})
-		}
-	}
-
+	gins.app = eng
 	return nil
 }
 
-func (gins *Gin) Content(contextInterface interface{}, c types.GetPanel) {
+func (gins *Gin) AddHandler(method, path string, handlers context.Handlers) {
+	gins.app.Handle(strings.ToUpper(method), path, func(c *gin.Context) {
+		ctx := context.NewContext(c.Request)
 
+		for _, param := range c.Params {
+			if c.Request.URL.RawQuery == "" {
+				c.Request.URL.RawQuery += strings.Replace(param.Key, ":", "", -1) + "=" + param.Value
+			} else {
+				c.Request.URL.RawQuery += "&" + strings.Replace(param.Key, ":", "", -1) + "=" + param.Value
+			}
+		}
+
+		ctx.SetHandlers(handlers).Next()
+		for key, head := range ctx.Response.Header {
+			c.Header(key, head[0])
+		}
+		if ctx.Response.Body != nil {
+			buf := new(bytes.Buffer)
+			_, _ = buf.ReadFrom(ctx.Response.Body)
+			c.String(ctx.Response.StatusCode, buf.String())
+		} else {
+			c.Status(ctx.Response.StatusCode)
+		}
+	})
+}
+
+func (gins *Gin) Name() string {
+	return "gin"
+}
+
+func (gins *Gin) SetContext(contextInterface interface{}) adapter.WebFrameWork {
 	var (
 		ctx *gin.Context
 		ok  bool
 	)
+
 	if ctx, ok = contextInterface.(*gin.Context); !ok {
 		panic("wrong parameter")
 	}
 
-	globalConfig := config.Get()
+	return &Gin{ctx: ctx}
+}
 
-	sesKey, err := ctx.Cookie("go_admin_session")
+func (gins *Gin) Redirect() {
+	gins.ctx.Redirect(http.StatusFound, config.Get().Url("/login"))
+	gins.ctx.Abort()
+}
 
-	if err != nil || sesKey == "" {
-		ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		ctx.Abort()
-		return
-	}
+func (gins *Gin) SetContentType() {
+	return
+}
 
-	userId, ok := auth.Driver.Load(sesKey)["user_id"]
+func (gins *Gin) Write(body []byte) {
+	gins.ctx.Data(http.StatusOK, gins.HTMLContentType(), body)
+}
 
-	if !ok {
-		ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		ctx.Abort()
-		return
-	}
+func (gins *Gin) GetCookie() (string, error) {
+	return gins.ctx.Cookie(gins.CookieKey())
+}
 
-	user, ok := auth.GetCurUserById(int64(userId.(float64)))
+func (gins *Gin) Path() string {
+	return gins.ctx.Request.URL.Path
+}
 
-	if !ok {
-		ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		ctx.Abort()
-		return
-	}
+func (gins *Gin) Method() string {
+	return gins.ctx.Request.Method
+}
 
-	var panel types.Panel
+func (gins *Gin) FormParam() url.Values {
+	_ = gins.ctx.Request.ParseMultipartForm(32 << 20)
+	return gins.ctx.Request.PostForm
+}
 
-	if !auth.CheckPermissions(user, ctx.Request.URL.Path, ctx.Request.Method) {
-		alert := template.Get(globalConfig.Theme).Alert().SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
-			SetTheme("warning").SetContent(template2.HTML("no permission")).GetContent()
-
-		panel = types.Panel{
-			Content:     alert,
-			Description: language.Get("error"),
-			Title:       language.Get("error"),
-		}
-	} else {
-		panel, err = c(ctx)
-		if err != nil {
-			alert := template.Get(globalConfig.Theme).
-				Alert().
-				SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
-				SetTheme("warning").SetContent(template2.HTML(err.Error())).GetContent()
-			panel = types.Panel{
-				Content:     alert,
-				Description: language.Get("error"),
-				Title:       language.Get("error"),
-			}
-		}
-	}
-
-	tmpl, tmplName := template.Get(globalConfig.Theme).GetTemplate(ctx.Request.Header.Get(constant.PjaxHeader) == "true")
-
-	ctx.Header("Content-Type", "text/html; charset=utf-8")
-
-	buf := new(bytes.Buffer)
-	err = tmpl.ExecuteTemplate(buf, tmplName, types.NewPage(user,
-		*(menu.GetGlobalMenu(user).SetActiveClass(globalConfig.UrlRemovePrefix(ctx.Request.URL.String()))),
-		panel, globalConfig, template.GetComponentAssetListsHTML()))
-	if err != nil {
-		logger.Error("Gin Content", err)
-	}
-	ctx.String(http.StatusOK, buf.String())
+func (gins *Gin) PjaxHeader() string {
+	return gins.ctx.Request.Header.Get(constant.PjaxHeader)
 }

@@ -3,10 +3,10 @@ package controller
 import (
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/auth"
-	"github.com/GoAdminGroup/go-admin/modules/language"
 	"github.com/GoAdminGroup/go-admin/modules/logger"
 	"github.com/GoAdminGroup/go-admin/modules/menu"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/constant"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/form"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/parameter"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/table"
 	"github.com/GoAdminGroup/go-admin/template"
@@ -18,11 +18,12 @@ import (
 	"strings"
 )
 
-func GlobalDeferHandler(ctx *context.Context) {
+// GlobalDeferHandler is a global error handler of admin plugin.
+func (h *Handler) GlobalDeferHandler(ctx *context.Context) {
 
 	logger.Access(ctx)
 
-	RecordOperationLog(ctx)
+	h.RecordOperationLog(ctx)
 
 	if err := recover(); err != nil {
 		logger.Error(err)
@@ -45,16 +46,16 @@ func GlobalDeferHandler(ctx *context.Context) {
 		}
 
 		if ok, _ = regexp.MatchString("/edit(.*)", ctx.Path()); ok {
-			setFormWithReturnErrMessage(ctx, errMsg, "edit")
+			h.setFormWithReturnErrMessage(ctx, errMsg, "edit")
 			return
 		}
 		if ok, _ = regexp.MatchString("/new(.*)", ctx.Path()); ok {
-			setFormWithReturnErrMessage(ctx, errMsg, "new")
+			h.setFormWithReturnErrMessage(ctx, errMsg, "new")
 			return
 		}
 
 		alert := aAlert().
-			SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
+			SetTitle(constant.DefaultErrorMsg).
 			SetTheme("warning").
 			SetContent(template2.HTML(errMsg)).
 			GetContent()
@@ -66,27 +67,24 @@ func GlobalDeferHandler(ctx *context.Context) {
 			Content:     alert,
 			Description: "error",
 			Title:       "error",
-		}, config, menu.GetGlobalMenu(user).SetActiveClass(config.UrlRemovePrefix(ctx.Path())))
-		ctx.Html(http.StatusOK, buf.String())
+		}, h.config, menu.GetGlobalMenu(user, h.conn).SetActiveClass(h.config.URLRemovePrefix(ctx.Path())))
+		ctx.HTML(http.StatusOK, buf.String())
 		return
 	}
 }
 
-func setFormWithReturnErrMessage(ctx *context.Context, errMsg string, kind string) {
+func (h *Handler) setFormWithReturnErrMessage(ctx *context.Context, errMsg string, kind string) {
 
 	alert := aAlert().
-		SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
+		SetTitle(constant.DefaultErrorMsg).
 		SetTheme("warning").
 		SetContent(template2.HTML(errMsg)).
 		GetContent()
 
 	var (
-		formData           []types.FormField
-		groupFormData      [][]types.FormField
-		groupHeaders       []string
-		title, description string
-		prefix             = ctx.Query("__prefix")
-		panel              = table.List[prefix]
+		formInfo table.FormInfo
+		prefix   = ctx.Query(constant.PrefixKey)
+		panel    = h.table(prefix, ctx)
 	)
 
 	if kind == "edit" {
@@ -94,33 +92,41 @@ func setFormWithReturnErrMessage(ctx *context.Context, errMsg string, kind strin
 		if id == "" {
 			id = ctx.Request.MultipartForm.Value[panel.GetPrimaryKey().Name][0]
 		}
-		formData, groupFormData, groupHeaders, title, description, _ = table.List[prefix].GetDataFromDatabaseWithId(id)
+		formInfo, _ = h.table(prefix, ctx).GetDataWithId(parameter.GetParam(ctx.Request.URL,
+			panel.GetInfo().DefaultPageSize,
+			panel.GetInfo().SortField,
+			panel.GetInfo().GetSort()).WithPKs(id))
 	} else {
-		formData, groupFormData, groupHeaders = table.GetNewFormList(panel.GetForm().TabHeaders, panel.GetForm().TabGroups, panel.GetForm().FieldList, panel.GetPrimaryKey().Name)
-		title = panel.GetForm().Title
-		description = panel.GetForm().Description
+		formInfo = panel.GetNewForm()
+		formInfo.Title = panel.GetForm().Title
+		formInfo.Description = panel.GetForm().Description
 	}
 
-	queryParam := parameter.GetParam(ctx.Request.URL.Query()).GetRouteParamStr()
+	queryParam := parameter.GetParam(ctx.Request.URL, panel.GetInfo().DefaultPageSize,
+		panel.GetInfo().SortField, panel.GetInfo().GetSort()).GetRouteParamStr()
 
 	user := auth.Auth(ctx)
 
 	tmpl, tmplName := aTemplate().GetTemplate(isPjax(ctx))
 	buf := template.Execute(tmpl, tmplName, user, types.Panel{
-		Content: alert + aForm().
-			SetContent(formData).
-			SetTabContents(groupFormData).
-			SetTabHeaders(groupHeaders).
+		Content: alert + formContent(aForm().
+			SetContent(formInfo.FieldList).
+			SetTabContents(formInfo.GroupFieldList).
+			SetTabHeaders(formInfo.GroupFieldHeaders).
 			SetTitle(template2.HTML(strings.Title(kind))).
 			SetPrimaryKey(panel.GetPrimaryKey().Name).
-			SetPrefix(config.PrefixFixSlash()).
-			SetUrl(config.Url("/"+kind+"/"+prefix)).
-			SetToken(auth.TokenHelper.AddToken()).
-			SetInfoUrl(config.Url("/info/"+prefix+queryParam)).
-			GetContent(),
-		Description: description,
-		Title:       title,
-	}, config, menu.GetGlobalMenu(user).SetActiveClass(config.UrlRemovePrefix(ctx.Path())))
-	ctx.Html(http.StatusOK, buf.String())
-	ctx.AddHeader(constant.PjaxUrlHeader, config.Url("/info/"+prefix+"/"+kind+queryParam))
+			SetPrefix(h.config.PrefixFixSlash()).
+			SetHiddenFields(map[string]string{
+				form.TokenKey:    h.authSrv().AddToken(),
+				form.PreviousKey: h.config.Url("/info/" + prefix + queryParam),
+			}).
+			SetUrl(h.config.Url("/"+kind+"/"+prefix)).
+			SetOperationFooter(formFooter(kind)).
+			SetHeader(panel.GetForm().HeaderHtml).
+			SetFooter(panel.GetForm().FooterHtml)),
+		Description: formInfo.Description,
+		Title:       formInfo.Title,
+	}, h.config, menu.GetGlobalMenu(user, h.conn).SetActiveClass(h.config.URLRemovePrefix(ctx.Path())))
+	ctx.HTML(http.StatusOK, buf.String())
+	ctx.AddHeader(constant.PjaxUrlHeader, h.config.Url("/info/"+prefix+"/"+kind+queryParam))
 }

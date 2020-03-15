@@ -10,22 +10,28 @@ type ExportParam struct {
 	Panel  table.Table
 	Id     []string
 	Prefix string
+	IsAll  bool
 }
 
-func Export(ctx *context.Context) {
-
-	prefix := ctx.Query("__prefix")
-	panel := table.List[prefix]
+func (g *Guard) Export(ctx *context.Context) {
+	panel, prefix := g.table(ctx)
 	if !panel.GetExportable() {
-		alert(ctx, panel, "operation not allow")
+		alert(ctx, panel, "operation not allow", g.conn)
 		ctx.Abort()
 		return
 	}
 
+	idStr := make([]string, 0)
+	ids := ctx.FormValue("id")
+	if ids != "" {
+		idStr = strings.Split(ctx.FormValue("id"), ",")
+	}
+
 	ctx.SetUserValue("export_param", &ExportParam{
 		Panel:  panel,
-		Id:     strings.Split(ctx.FormValue("id"), ","),
+		Id:     idStr,
 		Prefix: prefix,
+		IsAll:  ctx.FormValue("is_all") == "true",
 	})
 	ctx.Next()
 }

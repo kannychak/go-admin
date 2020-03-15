@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -7,91 +7,109 @@ package buffalo
 import (
 	"bytes"
 	"errors"
+	"github.com/GoAdminGroup/go-admin/adapter"
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/engine"
-	"github.com/GoAdminGroup/go-admin/modules/auth"
 	"github.com/GoAdminGroup/go-admin/modules/config"
-	"github.com/GoAdminGroup/go-admin/modules/language"
-	"github.com/GoAdminGroup/go-admin/modules/logger"
-	"github.com/GoAdminGroup/go-admin/modules/menu"
 	"github.com/GoAdminGroup/go-admin/plugins"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/models"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/constant"
-	"github.com/GoAdminGroup/go-admin/template"
 	"github.com/GoAdminGroup/go-admin/template/types"
 	"github.com/gobuffalo/buffalo"
-	template2 "html/template"
 	"net/http"
 	neturl "net/url"
 	"regexp"
 	"strings"
 )
 
+// Buffalo structure value is a Buffalo GoAdmin adapter.
 type Buffalo struct {
+	adapter.BaseAdapter
+	ctx buffalo.Context
+	app *buffalo.App
 }
 
 func init() {
 	engine.Register(new(Buffalo))
 }
 
-func (bu *Buffalo) Use(router interface{}, plugin []plugins.Plugin) error {
+func (bu *Buffalo) User(ci interface{}) (models.UserModel, bool) {
+	return bu.GetUser(ci, bu)
+}
 
+func (bu *Buffalo) Use(router interface{}, plugs []plugins.Plugin) error {
+	return bu.GetUse(router, plugs, bu)
+}
+
+func (bu *Buffalo) Content(ctx interface{}, getPanelFn types.GetPanelFn) {
+	bu.GetContent(ctx, getPanelFn, bu)
+}
+
+type HandlerFunc func(ctx buffalo.Context) (types.Panel, error)
+
+func Content(handler HandlerFunc) buffalo.Handler {
+	return func(ctx buffalo.Context) error {
+		engine.Content(ctx, func(ctx interface{}) (types.Panel, error) {
+			return handler(ctx.(buffalo.Context))
+		})
+		return nil
+	}
+}
+
+func (bu *Buffalo) SetApp(app interface{}) error {
 	var (
 		eng *buffalo.App
 		ok  bool
 	)
-	if eng, ok = router.(*buffalo.App); !ok {
+	if eng, ok = app.(*buffalo.App); !ok {
 		return errors.New("wrong parameter")
 	}
-
-	reg1 := regexp.MustCompile(":(.*?)/")
-	reg2 := regexp.MustCompile(":(.*?)$")
-
-	for _, plug := range plugin {
-		var plugCopy = plug
-		for _, req := range plug.GetRequest() {
-
-			url := req.URL
-			url = reg1.ReplaceAllString(url, "{$1}/")
-			url = reg2.ReplaceAllString(url, "{$1}")
-
-			getHandleFunc(eng, strings.ToUpper(req.Method))(url, func(c buffalo.Context) error {
-
-				if c.Request().URL.Path[len(c.Request().URL.Path)-1] == '/' {
-					c.Request().URL.Path = c.Request().URL.Path[:len(c.Request().URL.Path)-1]
-				}
-
-				ctx := context.NewContext(c.Request())
-
-				params := c.Params().(neturl.Values)
-
-				for key, param := range params {
-					if c.Request().URL.RawQuery == "" {
-						c.Request().URL.RawQuery += strings.Replace(key, ":", "", -1) + "=" + param[0]
-					} else {
-						c.Request().URL.RawQuery += "&" + strings.Replace(key, ":", "", -1) + "=" + param[0]
-					}
-				}
-
-				ctx.SetHandlers(plugCopy.GetHandler(c.Request().URL.Path, strings.ToLower(c.Request().Method))).Next()
-				for key, head := range ctx.Response.Header {
-					c.Response().Header().Set(key, head[0])
-				}
-				if ctx.Response.Body != nil {
-					buf := new(bytes.Buffer)
-					_, _ = buf.ReadFrom(ctx.Response.Body)
-					c.Response().WriteHeader(ctx.Response.StatusCode)
-					_, _ = c.Response().Write(buf.Bytes())
-				} else {
-					c.Response().WriteHeader(ctx.Response.StatusCode)
-				}
-				return nil
-			})
-		}
-	}
-
+	bu.app = eng
 	return nil
 }
 
+func (bu *Buffalo) AddHandler(method, path string, handlers context.Handlers) {
+	url := path
+	reg1 := regexp.MustCompile(":(.*?)/")
+	reg2 := regexp.MustCompile(":(.*?)$")
+	url = reg1.ReplaceAllString(url, "{$1}/")
+	url = reg2.ReplaceAllString(url, "{$1}")
+
+	getHandleFunc(bu.app, strings.ToUpper(method))(url, func(c buffalo.Context) error {
+
+		if c.Request().URL.Path[len(c.Request().URL.Path)-1] == '/' {
+			c.Request().URL.Path = c.Request().URL.Path[:len(c.Request().URL.Path)-1]
+		}
+
+		ctx := context.NewContext(c.Request())
+
+		params := c.Params().(neturl.Values)
+
+		for key, param := range params {
+			if c.Request().URL.RawQuery == "" {
+				c.Request().URL.RawQuery += strings.Replace(key, ":", "", -1) + "=" + param[0]
+			} else {
+				c.Request().URL.RawQuery += "&" + strings.Replace(key, ":", "", -1) + "=" + param[0]
+			}
+		}
+
+		ctx.SetHandlers(handlers).Next()
+		for key, head := range ctx.Response.Header {
+			c.Response().Header().Set(key, head[0])
+		}
+		if ctx.Response.Body != nil {
+			buf := new(bytes.Buffer)
+			_, _ = buf.ReadFrom(ctx.Response.Body)
+			c.Response().WriteHeader(ctx.Response.StatusCode)
+			_, _ = c.Response().Write(buf.Bytes())
+		} else {
+			c.Response().WriteHeader(ctx.Response.StatusCode)
+		}
+		return nil
+	})
+}
+
+// HandleFun is type of route methods of buffalo.
 type HandleFun func(p string, h buffalo.Handler) *buffalo.RouteInfo
 
 func getHandleFunc(eng *buffalo.App, method string) HandleFun {
@@ -115,8 +133,11 @@ func getHandleFunc(eng *buffalo.App, method string) HandleFun {
 	}
 }
 
-func (bu *Buffalo) Content(contextInterface interface{}, c types.GetPanel) {
+func (bu *Buffalo) Name() string {
+	return "buffalo"
+}
 
+func (bu *Buffalo) SetContext(contextInterface interface{}) adapter.WebFrameWork {
 	var (
 		ctx buffalo.Context
 		ok  bool
@@ -124,68 +145,39 @@ func (bu *Buffalo) Content(contextInterface interface{}, c types.GetPanel) {
 	if ctx, ok = contextInterface.(buffalo.Context); !ok {
 		panic("wrong parameter")
 	}
+	return &Buffalo{ctx: ctx}
+}
 
-	globalConfig := config.Get()
+func (bu *Buffalo) Redirect() {
+	_ = bu.ctx.Redirect(http.StatusFound, config.Get().Url("/login"))
+}
 
-	sesKey, err := ctx.Cookies().Get("go_admin_session")
+func (bu *Buffalo) SetContentType() {
+	bu.ctx.Response().Header().Set("Content-Type", bu.HTMLContentType())
+}
 
-	if err != nil || sesKey == "" {
-		_ = ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		return
-	}
+func (bu *Buffalo) Write(body []byte) {
+	bu.ctx.Response().WriteHeader(http.StatusOK)
+	_, _ = bu.ctx.Response().Write(body)
+}
 
-	userId, ok := auth.Driver.Load(sesKey)["user_id"]
+func (bu *Buffalo) GetCookie() (string, error) {
+	return bu.ctx.Cookies().Get(bu.CookieKey())
+}
 
-	if !ok {
-		_ = ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		return
-	}
+func (bu *Buffalo) Path() string {
+	return bu.ctx.Request().URL.Path
+}
 
-	user, ok := auth.GetCurUserById(int64(userId.(float64)))
+func (bu *Buffalo) Method() string {
+	return bu.ctx.Request().Method
+}
 
-	if !ok {
-		_ = ctx.Redirect(http.StatusFound, globalConfig.Url("/login"))
-		return
-	}
+func (bu *Buffalo) FormParam() neturl.Values {
+	_ = bu.ctx.Request().ParseMultipartForm(32 << 20)
+	return bu.ctx.Request().PostForm
+}
 
-	var (
-		panel types.Panel
-	)
-
-	if !auth.CheckPermissions(user, ctx.Request().URL.Path, ctx.Request().Method) {
-		alert := template.Get(globalConfig.Theme).Alert().SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
-			SetTheme("warning").SetContent(template2.HTML("no permission")).GetContent()
-
-		panel = types.Panel{
-			Content:     alert,
-			Description: language.Get("error"),
-			Title:       language.Get("error"),
-		}
-	} else {
-		panel, err = c(ctx)
-		if err != nil {
-			alert := template.Get(globalConfig.Theme).
-				Alert().
-				SetTitle(template2.HTML(`<i class="icon fa fa-warning"></i> ` + language.Get("error") + `!`)).
-				SetTheme("warning").SetContent(template2.HTML(err.Error())).GetContent()
-			panel = types.Panel{
-				Content:     alert,
-				Description: language.Get("error"),
-				Title:       language.Get("error"),
-			}
-		}
-	}
-
-	tmpl, tmplName := template.Get(globalConfig.Theme).GetTemplate(ctx.Request().Header.Get(constant.PjaxHeader) == "true")
-
-	ctx.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	buf := new(bytes.Buffer)
-	err = tmpl.ExecuteTemplate(buf, tmplName, types.NewPage(user,
-		*(menu.GetGlobalMenu(user).SetActiveClass(globalConfig.UrlRemovePrefix(ctx.Request().URL.String()))),
-		panel, globalConfig, template.GetComponentAssetListsHTML()))
-	if err != nil {
-		logger.Error("Buffalo Content", err)
-	}
-	_, _ = ctx.Response().Write(buf.Bytes())
+func (bu *Buffalo) PjaxHeader() string {
+	return bu.ctx.Request().Header.Get(constant.PjaxHeader)
 }

@@ -23,12 +23,13 @@
 
 GoAdmin 可以帮助你的golang应用快速实现数据可视化，搭建一个数据管理平台。
 
-demo: [https://demo.go-admin.cn](https://demo.go-admin.cn)
-账号：admin  密码：admin
+线上demo: [https://demo.go-admin.cn](https://demo.go-admin.cn)
 
-demo代码： https://github.com/GoAdminGroup/demo.go-admin.cn
+上手例子: [https://github.com/GoAdminGroup/example](https://github.com/GoAdminGroup/example)
 
-![](http://file.go-admin.cn/introduction/interface_2.png)
+[文档地址1](https://book.go-admin.cn/zh) | [备用文档地址1](https://www.kancloud.cn/cg33/goadmin/1498102) | [备用文档地址2](https://gitee.com/go-admin/docs/wikis/pages)
+
+![](http://file.go-admin.cn/introduction/interface_3.png)
 
 ## 特征
 
@@ -51,9 +52,9 @@ demo代码： https://github.com/GoAdminGroup/demo.go-admin.cn
 
 ### 第一步：导入 sql
 
-[mysql](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.sql)
-[postgresql](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.pgsql)
-[sqlite](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.db)
+- [mysql](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.sql)
+- [postgresql](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.pgsql)
+- [sqlite](https://raw.githubusercontent.com/GoAdminGroup/go-admin/master/data/admin.db)
 
 ### 第二步：创建 main.go
 
@@ -71,6 +72,9 @@ import (
 	"github.com/GoAdminGroup/go-admin/plugins/admin"
 	"github.com/GoAdminGroup/themes/adminlte"
 	"github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/template"
+    	"github.com/GoAdminGroup/go-admin/template/chartjs"
+    	"github.com/GoAdminGroup/go-admin/template/types"
 	"github.com/GoAdminGroup/go-admin/examples/datamodel"
 	"github.com/GoAdminGroup/go-admin/modules/language"
 )
@@ -88,7 +92,7 @@ func main() {
 			Port:         "3306",
 			User:         "root",
 			Pwd:          "root",
-			Name:         "godmin",
+			Name:         "goadmin",
 			MaxIdleCon: 50,
 			MaxOpenCon: 150,
 			Driver:       "mysql",
@@ -113,12 +117,23 @@ func main() {
     	// Generators： 详见 https://github.com/GoAdminGroup/go-admin/blob/master/examples/datamodel/tables.go
 	adminPlugin := admin.NewAdmin(datamodel.Generators)
 	
+	// 增加 chartjs 组件
+	template.AddComp(chartjs.NewChart())
+	
 	// 增加 generator, 第一个参数是对应的访问路由前缀
 	// 例子:
 	//
 	// "user" => http://localhost:9033/admin/info/user
 	//
 	// adminPlugin.AddGenerator("user", datamodel.GetUserTable)
+	
+	// 自定义首页
+        
+        	r.GET("/admin", func(ctx *gin.Context) {
+        		eng.Content(ctx, func(ctx interface{}) (types.Panel, error) {
+        			return datamodel.GetContent()
+        		})
+        	})
 
 	_ = eng.AddConfig(cfg).AddPlugins(adminPlugin).Use(r)
 
@@ -129,7 +144,7 @@ func main() {
 </p>
 </details>
 
-其他框架的例子: [https://github.com/GoAdminGroup/go-admin/tree/master/examples](https://github.com/GoAdminGroup/go-admin/tree/master/examples)
+更多框架的例子: [https://github.com/GoAdminGroup/go-admin/tree/master/examples](https://github.com/GoAdminGroup/go-admin/tree/master/examples)
 
 ### 第三步：运行
 
@@ -139,7 +154,9 @@ GO111MODULE=on go run main.go
 
 访问：[http://localhost:9033/admin](http://localhost:9033/admin)
 
-更多细节详见 [文档说明](http://www.go-admin.cn/docs/#/README)
+账号: admin 密码: admin
+
+更多细节详见 [文档说明](https://book.go-admin.cn/zh)
 
 [这里一个超级简单上手的例子](https://github.com/GoAdminGroup/example)
 

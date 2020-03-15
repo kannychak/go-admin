@@ -15,8 +15,10 @@ type PaginatorAttribute struct {
 	Pages             []map[string]string
 	NextClass         string
 	NextUrl           string
+	PageSizeList      []string
 	Option            map[string]template.HTML
 	Url               string
+	ExtraInfo         template.HTML
 	types.Attribute
 }
 
@@ -35,6 +37,11 @@ func (compo *PaginatorAttribute) SetTotal(value string) types.PaginatorAttribute
 	return compo
 }
 
+func (compo *PaginatorAttribute) SetExtraInfo(value template.HTML) types.PaginatorAttribute {
+	compo.ExtraInfo = value
+	return compo
+}
+
 func (compo *PaginatorAttribute) SetPreviousClass(value string) types.PaginatorAttribute {
 	compo.PreviousClass = value
 	return compo
@@ -47,6 +54,11 @@ func (compo *PaginatorAttribute) SetPreviousUrl(value string) types.PaginatorAtt
 
 func (compo *PaginatorAttribute) SetPages(value []map[string]string) types.PaginatorAttribute {
 	compo.Pages = value
+	return compo
+}
+
+func (compo *PaginatorAttribute) SetPageSizeList(value []string) types.PaginatorAttribute {
+	compo.PageSizeList = value
 	return compo
 }
 

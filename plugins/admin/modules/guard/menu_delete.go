@@ -8,12 +8,12 @@ type MenuDeleteParam struct {
 	Id string
 }
 
-func MenuDelete(ctx *context.Context) {
+func (g *Guard) MenuDelete(ctx *context.Context) {
 
 	id := ctx.Query("id")
 
 	if id == "" {
-		alertWithTitleAndDesc(ctx, "Menu", "menu", "wrong id")
+		alertWithTitleAndDesc(ctx, "Menu", "menu", "wrong id", g.conn)
 		ctx.Abort()
 		return
 	}

@@ -7,8 +7,8 @@ import (
 
 type TableAttribute struct {
 	Name       string
-	Thead      []map[string]string
-	InfoList   []map[string]template.HTML
+	Thead      types.Thead
+	InfoList   []map[string]types.InfoItem
 	Type       string
 	PrimaryKey string
 	NoAction   bool
@@ -16,17 +16,20 @@ type TableAttribute struct {
 	EditUrl    string
 	MinWidth   int
 	DeleteUrl  string
+	DetailUrl  string
+	UpdateUrl  string
+	Layout     string
 	IsTab      bool
 	ExportUrl  string
 	types.Attribute
 }
 
-func (compo *TableAttribute) SetThead(value []map[string]string) types.TableAttribute {
+func (compo *TableAttribute) SetThead(value types.Thead) types.TableAttribute {
 	compo.Thead = value
 	return compo
 }
 
-func (compo *TableAttribute) SetInfoList(value []map[string]template.HTML) types.TableAttribute {
+func (compo *TableAttribute) SetInfoList(value []map[string]types.InfoItem) types.TableAttribute {
 	compo.InfoList = value
 	return compo
 }
@@ -41,6 +44,11 @@ func (compo *TableAttribute) SetMinWidth(value int) types.TableAttribute {
 	return compo
 }
 
+func (compo *TableAttribute) SetLayout(value string) types.TableAttribute {
+	compo.Layout = value
+	return compo
+}
+
 func (compo *TableAttribute) GetContent() template.HTML {
 	if compo.MinWidth == 0 {
 		compo.MinWidth = 1000
@@ -50,17 +58,22 @@ func (compo *TableAttribute) GetContent() template.HTML {
 
 type DataTableAttribute struct {
 	TableAttribute
-	EditUrl    string
-	NewUrl     string
-	DeleteUrl  string
-	PrimaryKey string
-	IsTab      bool
-	ExportUrl  string
-	InfoUrl    string
-	NoAction   bool
-	Action     template.HTML
-	FilterUrl  string
-	Filters    []map[string]string
+	EditUrl           string
+	NewUrl            string
+	UpdateUrl         string
+	DetailUrl         string
+	DeleteUrl         string
+	PrimaryKey        string
+	IsTab             bool
+	ExportUrl         string
+	InfoUrl           string
+	Buttons           template.HTML
+	ActionJs          template.JS
+	IsHideFilterArea  bool
+	IsHideRowSelector bool
+	NoAction          bool
+	HasFilter         bool
+	Action            template.HTML
 	types.Attribute
 }
 
@@ -68,13 +81,38 @@ func (compo *DataTableAttribute) GetDataTableHeader() template.HTML {
 	return ComposeHtml(compo.TemplateList, *compo, "table/box-header")
 }
 
-func (compo *DataTableAttribute) SetThead(value []map[string]string) types.DataTableAttribute {
+func (compo *DataTableAttribute) SetThead(value types.Thead) types.DataTableAttribute {
 	compo.Thead = value
+	return compo
+}
+
+func (compo *DataTableAttribute) SetLayout(value string) types.DataTableAttribute {
+	compo.Layout = value
 	return compo
 }
 
 func (compo *DataTableAttribute) SetIsTab(value bool) types.DataTableAttribute {
 	compo.IsTab = value
+	return compo
+}
+
+func (compo *DataTableAttribute) SetButtons(btns template.HTML) types.DataTableAttribute {
+	compo.Buttons = btns
+	return compo
+}
+
+func (compo *DataTableAttribute) SetHideFilterArea(value bool) types.DataTableAttribute {
+	compo.IsHideFilterArea = value
+	return compo
+}
+
+func (compo *DataTableAttribute) SetActionJs(aj template.JS) types.DataTableAttribute {
+	compo.ActionJs = aj
+	return compo
+}
+
+func (compo *DataTableAttribute) SetHasFilter(hasFilter bool) types.DataTableAttribute {
+	compo.HasFilter = hasFilter
 	return compo
 }
 
@@ -93,8 +131,18 @@ func (compo *DataTableAttribute) SetExportUrl(value string) types.DataTableAttri
 	return compo
 }
 
-func (compo *DataTableAttribute) SetFilterUrl(value string) types.DataTableAttribute {
-	compo.FilterUrl = value
+func (compo *DataTableAttribute) SetHideRowSelector(value bool) types.DataTableAttribute {
+	compo.IsHideRowSelector = value
+	return compo
+}
+
+func (compo *DataTableAttribute) SetUpdateUrl(value string) types.DataTableAttribute {
+	compo.UpdateUrl = value
+	return compo
+}
+
+func (compo *DataTableAttribute) SetDetailUrl(value string) types.DataTableAttribute {
+	compo.DetailUrl = value
 	return compo
 }
 
@@ -103,12 +151,7 @@ func (compo *DataTableAttribute) SetPrimaryKey(value string) types.DataTableAttr
 	return compo
 }
 
-func (compo *DataTableAttribute) SetFilters(value []map[string]string) types.DataTableAttribute {
-	compo.Filters = value
-	return compo
-}
-
-func (compo *DataTableAttribute) SetInfoList(value []map[string]template.HTML) types.DataTableAttribute {
+func (compo *DataTableAttribute) SetInfoList(value []map[string]types.InfoItem) types.DataTableAttribute {
 	compo.InfoList = value
 	return compo
 }
@@ -132,7 +175,7 @@ func (compo *DataTableAttribute) GetContent() template.HTML {
 	if compo.MinWidth == 0 {
 		compo.MinWidth = 1000
 	}
-	if compo.EditUrl == "" && compo.DeleteUrl == "" && compo.Action == "" {
+	if compo.EditUrl == "" && compo.DeleteUrl == "" && compo.DetailUrl == "" && compo.Action == "" {
 		compo.NoAction = true
 	}
 	return ComposeHtml(compo.TemplateList, *compo, "table")

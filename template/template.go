@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -40,6 +40,8 @@ type Template interface {
 	Tree() types.TreeAttribute
 	Tabs() types.TabsAttribute
 	Alert() types.AlertAttribute
+	Link() types.LinkAttribute
+
 	Paginator() types.PaginatorAttribute
 	Popup() types.PopupAttribute
 	Box() types.BoxAttribute
@@ -47,11 +49,25 @@ type Template interface {
 	Label() types.LabelAttribute
 	Image() types.ImgAttribute
 
+	Button() types.ButtonAttribute
+
 	// Builder methods
 	GetTmplList() map[string]string
 	GetAssetList() []string
 	GetAsset(string) ([]byte, error)
 	GetTemplate(bool) (*template.Template, string)
+}
+
+func HTML(s string) template.HTML {
+	return template.HTML(s)
+}
+
+func CSS(s string) template.CSS {
+	return template.CSS(s)
+}
+
+func JS(s string) template.JS {
+	return template.JS(s)
 }
 
 // The templateMap contains templates registered.
@@ -250,39 +266,50 @@ func Execute(tmpl *template.Template,
 	user models.UserModel,
 	panel types.Panel,
 	config c.Config,
-	globalMenu *menu.Menu) *bytes.Buffer {
+	globalMenu *menu.Menu, animation ...bool) *bytes.Buffer {
 
 	buf := new(bytes.Buffer)
-	err := tmpl.ExecuteTemplate(buf, tmplName, types.NewPage(user, *globalMenu, panel, config, GetComponentAssetListsHTML()))
+	err := tmpl.ExecuteTemplate(buf, tmplName, types.NewPage(user, *globalMenu,
+		panel.GetContent(append([]bool{config.IsProductionEnvironment()}, animation...)...), config, GetComponentAssetListsHTML()))
 	if err != nil {
 		fmt.Println("Execute err", err)
 	}
 	return buf
 }
 
-func DefaultFuncMap() template.FuncMap {
-	return template.FuncMap{
-		"lang":     language.Get,
-		"langHtml": language.GetFromHtml,
-		"link": func(cdnUrl, prefixUrl, assetsUrl string) string {
-			if cdnUrl == "" {
-				return prefixUrl + assetsUrl
-			}
-			return cdnUrl + assetsUrl
-		},
-		"isLinkUrl": func(s string) bool {
-			return (len(s) > 7 && s[:7] == "http://") || (len(s) > 8 && s[:8] == "https://")
-		},
-	}
+var DefaultFuncMap = template.FuncMap{
+	"lang":     language.Get,
+	"langHtml": language.GetFromHtml,
+	"link": func(cdnUrl, prefixUrl, assetsUrl string) string {
+		if cdnUrl == "" {
+			return prefixUrl + assetsUrl
+		}
+		return cdnUrl + assetsUrl
+	},
+	"isLinkUrl": func(s string) bool {
+		return (len(s) > 7 && s[:7] == "http://") || (len(s) > 8 && s[:8] == "https://")
+	},
+	"render": func(s, old, repl template.HTML) template.HTML {
+		return template.HTML(strings.Replace(string(s), string(old), string(repl), -1))
+	},
+	"renderJS": func(s template.JS, old, repl template.HTML) template.JS {
+		return template.JS(strings.Replace(string(s), string(old), string(repl), -1))
+	},
+	"divide": func(a, b int) int {
+		return a / b
+	},
+	"js": func(s interface{}) template.JS {
+		if ss, ok := s.(string); ok {
+			return template.JS(ss)
+		}
+		if ss, ok := s.(template.HTML); ok {
+			return template.JS(ss)
+		}
+		return ""
+	},
 }
 
-type BaseComponent struct {
-}
+type BaseComponent struct{}
 
-func (b BaseComponent) GetAssetList() []string {
-	return make([]string, 0)
-}
-
-func (b BaseComponent) GetAsset(name string) ([]byte, error) {
-	return nil, nil
-}
+func (b BaseComponent) GetAssetList() []string               { return make([]string, 0) }
+func (b BaseComponent) GetAsset(name string) ([]byte, error) { return nil, nil }

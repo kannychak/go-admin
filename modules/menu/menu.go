@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -13,6 +13,7 @@ import (
 	"strconv"
 )
 
+// Item is an menu item.
 type Item struct {
 	Name         string
 	ID           string
@@ -23,20 +24,24 @@ type Item struct {
 	ChildrenList []Item
 }
 
+// Menu contains list of menu items and other info.
 type Menu struct {
 	List     []Item
 	Options  []map[string]string
 	MaxOrder int64
 }
 
-func (menu *Menu) SexMaxOrder(order int64) {
+// SetMaxOrder set the max order of menu.
+func (menu *Menu) SetMaxOrder(order int64) {
 	menu.MaxOrder = order
 }
 
+// AddMaxOrder add the max order of menu.
 func (menu *Menu) AddMaxOrder() {
-	menu.MaxOrder += 1
+	menu.MaxOrder++
 }
 
+// SetActiveClass set the active class of menu.
 func (menu *Menu) SetActiveClass(path string) *Menu {
 
 	reg, _ := regexp.Compile(`\?(.*)`)
@@ -50,23 +55,24 @@ func (menu *Menu) SetActiveClass(path string) *Menu {
 		if menu.List[i].Url == path && len(menu.List[i].ChildrenList) == 0 {
 			menu.List[i].Active = "active"
 			return menu
-		} else {
-			for j := 0; j < len(menu.List[i].ChildrenList); j++ {
-				if menu.List[i].ChildrenList[j].Url == path {
-					menu.List[i].Active = "active"
-					menu.List[i].ChildrenList[j].Active = "active"
-					return menu
-				} else {
-					menu.List[i].Active = ""
-					menu.List[i].ChildrenList[j].Active = ""
-				}
+		}
+
+		for j := 0; j < len(menu.List[i].ChildrenList); j++ {
+			if menu.List[i].ChildrenList[j].Url == path {
+				menu.List[i].Active = "active"
+				menu.List[i].ChildrenList[j].Active = "active"
+				return menu
 			}
+
+			menu.List[i].Active = ""
+			menu.List[i].ChildrenList[j].Active = ""
 		}
 	}
 
 	return menu
 }
 
+// FormatPath get template.HTML for front-end.
 func (menu Menu) FormatPath() template.HTML {
 	res := template.HTML(``)
 	for i := 0; i < len(menu.List); i++ {
@@ -89,11 +95,13 @@ func (menu Menu) FormatPath() template.HTML {
 	return res
 }
 
+// GetEditMenuList return menu items list.
 func (menu *Menu) GetEditMenuList() []Item {
 	return menu.List
 }
 
-func GetGlobalMenu(user models.UserModel) *Menu {
+// GetGlobalMenu return Menu of given user model.
+func GetGlobalMenu(user models.UserModel, conn db.Connection) *Menu {
 
 	var (
 		menus      []map[string]interface{}
@@ -103,7 +111,7 @@ func GetGlobalMenu(user models.UserModel) *Menu {
 	user.WithRoles().WithMenus()
 
 	if user.IsSuperAdmin() {
-		menus, _ = db.Table("goadmin_menu").
+		menus, _ = db.WithDriver(conn).Table("goadmin_menu").
 			Where("id", ">", 0).
 			OrderBy("order", "asc").
 			All()
@@ -114,7 +122,7 @@ func GetGlobalMenu(user models.UserModel) *Menu {
 			ids = append(ids, user.MenuIds[i])
 		}
 
-		menus, _ = db.Table("goadmin_menu").
+		menus, _ = db.WithDriver(conn).Table("goadmin_menu").
 			WhereIn("id", ids).
 			OrderBy("order", "asc").
 			All()
@@ -144,13 +152,13 @@ func GetGlobalMenu(user models.UserModel) *Menu {
 	}
 }
 
-func constructMenuTree(menus []map[string]interface{}, parentId int64) []Item {
+func constructMenuTree(menus []map[string]interface{}, parentID int64) []Item {
 
 	branch := make([]Item, 0)
 
 	var title string
 	for j := 0; j < len(menus); j++ {
-		if parentId == menus[j]["parent_id"].(int64) {
+		if parentID == menus[j]["parent_id"].(int64) {
 
 			childList := constructMenuTree(menus, menus[j]["id"].(int64))
 

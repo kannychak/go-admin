@@ -1,4 +1,4 @@
-// Copyright 2019 GoAdmin Core Team.  All rights reserved.
+// Copyright 2019 GoAdmin Core Team. All rights reserved.
 // Use of this source code is governed by a Apache-2.0 style
 // license that can be found in the LICENSE file.
 
@@ -7,9 +7,13 @@ package context
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"github.com/GoAdminGroup/go-admin/modules/constant"
 	"io/ioutil"
 	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -29,12 +33,42 @@ type Context struct {
 	handlers  Handlers
 }
 
-// Path is used in the matching of request and response. URL stores the
+// Path is used in the matching of request and response. Url stores the
 // raw register url. RegUrl contains the wildcard which on behalf of
 // the route params.
 type Path struct {
 	URL    string
 	Method string
+}
+
+type RouterMap map[string]Router
+
+func (r RouterMap) Get(name string) Router {
+	return r[name]
+}
+
+type Router struct {
+	Methods []string
+	Patten  string
+}
+
+func (r Router) Method() string {
+	return r.Methods[0]
+}
+
+func (r Router) GetURL(value ...string) string {
+	u := r.Patten
+	for i := 0; i < len(value); i += 2 {
+		u = strings.Replace(u, ":__"+value[i], value[i+1], -1)
+	}
+	return u
+}
+
+type Node struct {
+	Path     string
+	Method   string
+	Handlers []Handler
+	Value    map[string]interface{}
 }
 
 // SetUserValue set the value of user context.
@@ -60,7 +94,7 @@ func (ctx *Context) Next() {
 	}
 }
 
-// Next should be used only inside middleware.
+// SetHandlers set the handlers of Context.
 func (ctx *Context) SetHandlers(handlers Handlers) *Context {
 	ctx.handlers = handlers
 	return ctx
@@ -79,11 +113,36 @@ func NewContext(req *http.Request) *Context {
 		Request:   req,
 		UserValue: make(map[string]interface{}),
 		Response: &http.Response{
-			StatusCode: 200,
+			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
 		},
 		index: -1,
 	}
+}
+
+func (ctx *Context) BindJSON(data interface{}) error {
+	if ctx.Request.Body != nil {
+		b, err := ioutil.ReadAll(ctx.Request.Body)
+		if err == nil {
+			return json.Unmarshal(b, data)
+		}
+		return err
+	}
+	return errors.New("empty request body")
+}
+
+func (ctx *Context) MustBindJSON(data interface{}) {
+	if ctx.Request.Body != nil {
+		b, err := ioutil.ReadAll(ctx.Request.Body)
+		if err != nil {
+			panic(err)
+		}
+		err = json.Unmarshal(b, data)
+		if err != nil {
+			panic(err)
+		}
+	}
+	panic("empty request body")
 }
 
 // Write save the given status code, header and body string into the response.
@@ -95,9 +154,9 @@ func (ctx *Context) Write(code int, Header map[string]string, Body string) {
 	ctx.Response.Body = ioutil.NopCloser(strings.NewReader(Body))
 }
 
-// Json serializes the given struct as JSON into the response body.
+// JSON serializes the given struct as JSON into the response body.
 // It also sets the Content-Type as "application/json".
-func (ctx *Context) Json(code int, Body map[string]interface{}) {
+func (ctx *Context) JSON(code int, Body map[string]interface{}) {
 	ctx.Response.StatusCode = code
 	ctx.AddHeader("Content-Type", "application/json")
 	BodyStr, err := json.Marshal(Body)
@@ -114,16 +173,23 @@ func (ctx *Context) Data(code int, contentType string, data []byte) {
 	ctx.Response.Body = ioutil.NopCloser(bytes.NewBuffer(data))
 }
 
-// Html output html response.
-func (ctx *Context) Html(code int, body string) {
+// Redirect add redirect url to header.
+func (ctx *Context) Redirect(path string) {
+	ctx.Response.StatusCode = http.StatusFound
+	ctx.AddHeader("Content-Type", "text/html; charset=utf-8")
+	ctx.AddHeader("Location", path)
+}
+
+// HTML output html response.
+func (ctx *Context) HTML(code int, body string) {
 	ctx.AddHeader("Content-Type", "text/html; charset=utf-8")
 	ctx.SetStatusCode(code)
 	ctx.WriteString(body)
 }
 
-// Write save the given body string into the response.
-func (ctx *Context) WriteString(Body string) {
-	ctx.Response.Body = ioutil.NopCloser(strings.NewReader(Body))
+// WriteString save the given body string into the response.
+func (ctx *Context) WriteString(body string) {
+	ctx.Response.Body = ioutil.NopCloser(strings.NewReader(body))
 }
 
 // SetStatusCode save the given status code into the response.
@@ -131,13 +197,28 @@ func (ctx *Context) SetStatusCode(code int) {
 	ctx.Response.StatusCode = code
 }
 
-// SetStatusCode save the given content type header into the response header.
+// SetContentType save the given content type header into the response header.
 func (ctx *Context) SetContentType(contentType string) {
 	ctx.AddHeader("Content-Type", contentType)
 }
 
 // LocalIP return the request client ip.
 func (ctx *Context) LocalIP() string {
+	xForwardedFor := ctx.Request.Header.Get("X-Forwarded-For")
+	ip := strings.TrimSpace(strings.Split(xForwardedFor, ",")[0])
+	if ip != "" {
+		return ip
+	}
+
+	ip = strings.TrimSpace(ctx.Request.Header.Get("X-Real-Ip"))
+	if ip != "" {
+		return ip
+	}
+
+	if ip, _, err := net.SplitHostPort(strings.TrimSpace(ctx.Request.RemoteAddr)); err == nil {
+		return ip
+	}
+
 	return "127.0.0.1"
 }
 
@@ -172,9 +253,20 @@ func (ctx *Context) FormValue(key string) string {
 	return ctx.Request.FormValue(key)
 }
 
+// PostForm get the values of request form.
+func (ctx *Context) PostForm() url.Values {
+	_ = ctx.Request.ParseMultipartForm(32 << 20)
+	return ctx.Request.PostForm
+}
+
 // AddHeader adds the key, value pair to the header.
 func (ctx *Context) AddHeader(key, value string) {
 	ctx.Response.Header.Add(key, value)
+}
+
+// PjaxUrl add pjax url header.
+func (ctx *Context) PjaxUrl(url string) {
+	ctx.Response.Header.Add(constant.PjaxUrlHeader, url)
 }
 
 // SetHeader set the key, value pair to the header.
@@ -187,28 +279,38 @@ func (ctx *Context) User() interface{} {
 	return ctx.UserValue["user"]
 }
 
+type HandlerMap map[Path]Handlers
+
 // App is the key struct of the package. App as a member of plugin
 // entity contains the request and the corresponding handler. Prefix
 // is the url prefix and MiddlewareList is for control flow.
 type App struct {
 	Requests    []Path
-	tree        *node
+	Handlers    HandlerMap
 	Middlewares Handlers
 	Prefix      string
+
+	Routers    RouterMap
+	routeIndex int
+	routeANY   bool
 }
 
 // NewApp return an empty app.
 func NewApp() *App {
 	return &App{
 		Requests:    make([]Path, 0),
-		tree:        Tree(),
+		Handlers:    make(HandlerMap),
 		Prefix:      "/",
 		Middlewares: make([]Handler, 0),
+		routeIndex:  -1,
+		Routers:     make(RouterMap),
 	}
 }
 
+// Handler defines the handler used by the middleware as return value.
 type Handler func(ctx *Context)
 
+// Handlers is the array of Handler
 type Handlers []Handler
 
 // AppendReqAndResp stores the request info and handle into app.
@@ -226,57 +328,90 @@ func (app *App) AppendReqAndResp(url, method string, handler []Handler) {
 		URL:    join(app.Prefix, url),
 		Method: method,
 	})
+	app.routeIndex++
 
-	app.tree.addPath(stringToArr(join(app.Prefix, slash(url))), method, append(app.Middlewares, handler...))
+	app.Handlers[Path{
+		URL:    join(app.Prefix, url),
+		Method: method,
+	}] = append(app.Middlewares, handler...)
 }
 
 // Find is public helper method for findPath of tree.
 func (app *App) Find(url, method string) []Handler {
-	return app.tree.findPath(stringToArr(url), method)
+	app.routeANY = false
+	return app.Handlers[Path{URL: url, Method: method}]
 }
 
 // POST is a shortcut for app.AppendReqAndResp(url, "post", handler).
-func (app *App) POST(url string, handler ...Handler) {
+func (app *App) POST(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "post", handler)
+	return app
 }
 
 // GET is a shortcut for app.AppendReqAndResp(url, "get", handler).
-func (app *App) GET(url string, handler ...Handler) {
+func (app *App) GET(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "get", handler)
+	return app
 }
 
 // DELETE is a shortcut for app.AppendReqAndResp(url, "delete", handler).
-func (app *App) DELETE(url string, handler ...Handler) {
+func (app *App) DELETE(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "delete", handler)
+	return app
 }
 
 // PUT is a shortcut for app.AppendReqAndResp(url, "put", handler).
-func (app *App) PUT(url string, handler ...Handler) {
+func (app *App) PUT(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "put", handler)
+	return app
 }
 
 // OPTIONS is a shortcut for app.AppendReqAndResp(url, "options", handler).
-func (app *App) OPTIONS(url string, handler ...Handler) {
+func (app *App) OPTIONS(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "options", handler)
+	return app
 }
 
 // HEAD is a shortcut for app.AppendReqAndResp(url, "head", handler).
-func (app *App) HEAD(url string, handler ...Handler) {
+func (app *App) HEAD(url string, handler ...Handler) *App {
+	app.routeANY = false
 	app.AppendReqAndResp(url, "head", handler)
+	return app
 }
 
-// Any registers a route that matches all the HTTP methods.
+// ANY registers a route that matches all the HTTP methods.
 // GET, POST, PUT, HEAD, OPTIONS, DELETE.
-func (app *App) ANY(url string, handler ...Handler) {
+func (app *App) ANY(url string, handler ...Handler) *App {
+	app.routeANY = true
 	app.AppendReqAndResp(url, "post", handler)
 	app.AppendReqAndResp(url, "get", handler)
 	app.AppendReqAndResp(url, "delete", handler)
 	app.AppendReqAndResp(url, "put", handler)
 	app.AppendReqAndResp(url, "options", handler)
 	app.AppendReqAndResp(url, "head", handler)
+	return app
 }
 
-// TabGroups add middlewares and prefix for App.
+func (app *App) Name(name string) {
+	if app.routeANY {
+		app.Routers[name] = Router{
+			Methods: []string{"POST", "GET", "DELETE", "PUT", "OPTIONS", "HEAD"},
+			Patten:  app.Requests[app.routeIndex].URL,
+		}
+	} else {
+		app.Routers[name] = Router{
+			Methods: []string{app.Requests[app.routeIndex].Method},
+			Patten:  app.Requests[app.routeIndex].URL,
+		}
+	}
+}
+
+// Group add middlewares and prefix for App.
 func (app *App) Group(prefix string, middleware ...Handler) *RouterGroup {
 	return &RouterGroup{
 		app:         app,
@@ -307,52 +442,77 @@ func (g *RouterGroup) AppendReqAndResp(url, method string, handler []Handler) {
 		URL:    join(g.Prefix, url),
 		Method: method,
 	})
+	g.app.routeIndex++
 
-	g.app.tree.addPath(stringToArr(join(g.Prefix, slash(url))), method, append(g.Middlewares, handler...))
+	var h = make([]Handler, len(g.Middlewares))
+	copy(h, g.Middlewares)
+
+	g.app.Handlers[Path{
+		URL:    join(g.Prefix, url),
+		Method: method,
+	}] = append(h, handler...)
 }
 
 // POST is a shortcut for app.AppendReqAndResp(url, "post", handler).
-func (g *RouterGroup) POST(url string, handler ...Handler) {
+func (g *RouterGroup) POST(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "post", handler)
+	return g
 }
 
 // GET is a shortcut for app.AppendReqAndResp(url, "get", handler).
-func (g *RouterGroup) GET(url string, handler ...Handler) {
+func (g *RouterGroup) GET(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "get", handler)
+	return g
 }
 
 // DELETE is a shortcut for app.AppendReqAndResp(url, "delete", handler).
-func (g *RouterGroup) DELETE(url string, handler ...Handler) {
+func (g *RouterGroup) DELETE(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "delete", handler)
+	return g
 }
 
 // PUT is a shortcut for app.AppendReqAndResp(url, "put", handler).
-func (g *RouterGroup) PUT(url string, handler ...Handler) {
+func (g *RouterGroup) PUT(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "put", handler)
+	return g
 }
 
 // OPTIONS is a shortcut for app.AppendReqAndResp(url, "options", handler).
-func (g *RouterGroup) OPTIONS(url string, handler ...Handler) {
+func (g *RouterGroup) OPTIONS(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "options", handler)
+	return g
 }
 
 // HEAD is a shortcut for app.AppendReqAndResp(url, "head", handler).
-func (g *RouterGroup) HEAD(url string, handler ...Handler) {
+func (g *RouterGroup) HEAD(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = false
 	g.AppendReqAndResp(url, "head", handler)
+	return g
 }
 
-// Any registers a route that matches all the HTTP methods.
+// ANY registers a route that matches all the HTTP methods.
 // GET, POST, PUT, HEAD, OPTIONS, DELETE.
-func (g *RouterGroup) ANY(url string, handler ...Handler) {
+func (g *RouterGroup) ANY(url string, handler ...Handler) *RouterGroup {
+	g.app.routeANY = true
 	g.AppendReqAndResp(url, "post", handler)
 	g.AppendReqAndResp(url, "get", handler)
 	g.AppendReqAndResp(url, "delete", handler)
 	g.AppendReqAndResp(url, "put", handler)
 	g.AppendReqAndResp(url, "options", handler)
 	g.AppendReqAndResp(url, "head", handler)
+	return g
 }
 
-// TabGroups add middlewares and prefix for App.
+func (g *RouterGroup) Name(name string) {
+	g.app.Name(name)
+}
+
+// Group add middlewares and prefix for RouterGroup.
 func (g *RouterGroup) Group(prefix string, middleware ...Handler) *RouterGroup {
 	return &RouterGroup{
 		app:         g.app,

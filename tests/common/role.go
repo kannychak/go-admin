@@ -3,11 +3,13 @@ package common
 import (
 	"fmt"
 	"github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/constant"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/form"
 	"github.com/gavv/httpexpect"
 	"net/http"
 )
 
-func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
+func roleTest(e *httpexpect.Expect, sesID *http.Cookie) {
 
 	fmt.Println()
 	printlnWithColor("Role", "blue")
@@ -17,7 +19,7 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("show", "green")
 	e.GET(config.Get().Url("/info/roles")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		Expect().
 		Status(200).
 		Body().Contains("Administrator").Contains("Operator")
@@ -26,7 +28,7 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("show new form", "green")
 	formBody := e.GET(config.Get().Url("/info/roles/new")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		Expect().Status(200).Body()
 
 	token := reg.FindStringSubmatch(formBody.Raw())
@@ -35,14 +37,14 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("new roles tester", "green")
 	res := e.POST(config.Get().Url("/new/roles")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		WithMultipart().
 		WithFormField("permission_id[]", "3").
 		WithForm(map[string]interface{}{
-			"name":       "tester",
-			"slug":       "tester",
-			"_previous_": config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
-			"_t":         token[1],
+			"name":           "tester",
+			"slug":           "tester",
+			form.PreviousKey: config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
+			form.TokenKey:    token[1],
 		}).Expect().Status(200)
 	res.Header("X-Pjax-Url").Contains(config.Get().Url("/info/"))
 	res.Body().Contains("tester")
@@ -51,15 +53,15 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("show form: without id", "green")
 	e.GET(config.Get().Url("/info/roles/edit")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		Expect().Status(200).Body().Contains("wrong id")
 
 	// show form
 
 	printlnWithColor("show form", "green")
 	formBody = e.GET(config.Get().Url("/info/roles/edit")).
-		WithQuery("id", "3").
-		WithCookie(sesId.Name, sesId.Value).
+		WithQuery(constant.EditPKKey, "3").
+		WithCookie(sesID.Name, sesID.Value).
 		Expect().Status(200).Body()
 
 	token = reg.FindStringSubmatch(formBody.Raw())
@@ -68,16 +70,16 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("edit form", "green")
 	res = e.POST(config.Get().Url("/edit/roles")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		WithMultipart().
 		WithFormField("permission_id[]", "3").
 		WithFormField("permission_id[]", "2").
 		WithForm(map[string]interface{}{
-			"name":       "tester",
-			"slug":       "tester",
-			"_previous_": config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
-			"_t":         token[1],
-			"id":         "3",
+			"name":           "tester",
+			"slug":           "tester",
+			form.PreviousKey: config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
+			form.TokenKey:    token[1],
+			"id":             "3",
 		}).Expect().Status(200)
 	res.Header("X-Pjax-Url").Contains(config.Get().Url("/info/"))
 	res.Body().Contains("tester")
@@ -86,7 +88,7 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("show new form", "green")
 	formBody = e.GET(config.Get().Url("/info/roles/new")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		Expect().Status(200).Body()
 
 	token = reg.FindStringSubmatch(formBody.Raw())
@@ -95,21 +97,21 @@ func RoleTest(e *httpexpect.Expect, sesId *http.Cookie) {
 
 	printlnWithColor("new tester2", "green")
 	e.POST(config.Get().Url("/new/roles")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		WithMultipart().
 		WithFormField("permission_id[]", "3").
 		WithForm(map[string]interface{}{
-			"name":       "tester2",
-			"slug":       "tester2",
-			"_previous_": config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
-			"_t":         token[1],
+			"name":           "tester2",
+			"slug":           "tester2",
+			form.PreviousKey: config.Get().Url("/info/roles?__page=1&__pageSize=10&__sort=id&__sort_type=desc"),
+			form.TokenKey:    token[1],
 		}).Expect().Status(200)
 
 	// delete tester2
 
 	printlnWithColor("delete roles tester2", "green")
 	e.POST(config.Get().Url("/delete/roles")).
-		WithCookie(sesId.Name, sesId.Value).
+		WithCookie(sesID.Name, sesID.Value).
 		WithMultipart().
 		WithFormField("id", "3").
 		Expect().Status(200).JSON().Object().

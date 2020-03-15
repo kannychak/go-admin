@@ -4,6 +4,7 @@ import (
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/auth"
 	"github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/modules/db"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/form"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/parameter"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/table"
@@ -18,20 +19,12 @@ type ShowNewFormParam struct {
 	Param  parameter.Parameters
 }
 
-func (e *ShowNewFormParam) GetUrl() string {
-	return config.Get().Url("/new/" + e.Prefix)
-}
+func (g *Guard) ShowNewForm(ctx *context.Context) {
 
-func (e *ShowNewFormParam) GetInfoUrl() string {
-	return config.Get().Url("/info/" + e.Prefix + e.Param.GetRouteParamStrWithoutId())
-}
+	panel, prefix := g.table(ctx)
 
-func ShowNewForm(ctx *context.Context) {
-
-	prefix := ctx.Query("__prefix")
-	panel := table.List[prefix]
 	if !panel.GetCanAdd() {
-		alert(ctx, panel, "operation not allow")
+		alert(ctx, panel, "operation not allow", g.conn)
 		ctx.Abort()
 		return
 	}
@@ -39,7 +32,8 @@ func ShowNewForm(ctx *context.Context) {
 	ctx.SetUserValue("show_new_form_param", &ShowNewFormParam{
 		Panel:  panel,
 		Prefix: prefix,
-		Param:  parameter.GetParam(ctx.Request.URL.Query()),
+		Param: parameter.GetParam(ctx.Request.URL, panel.GetInfo().DefaultPageSize, panel.GetInfo().SortField,
+			panel.GetInfo().GetSort()),
 	})
 	ctx.Next()
 }
@@ -53,10 +47,10 @@ type NewFormParam struct {
 	Id           string
 	Prefix       string
 	Param        parameter.Parameters
-	Previous     string
 	Path         string
 	MultiForm    *multipart.Form
 	PreviousPath string
+	FromList     bool
 	Alert        template.HTML
 }
 
@@ -64,36 +58,8 @@ func (e NewFormParam) Value() form.Values {
 	return e.MultiForm.Value
 }
 
-func (e NewFormParam) GetEditUrl() string {
-	return e.getUrl("edit")
-}
-
-func (e NewFormParam) GetNewUrl() string {
-	return e.getUrl("new")
-}
-
-func (e NewFormParam) GetDeleteUrl() string {
-	return config.Get().Url("/delete/" + e.Prefix)
-}
-
-func (e NewFormParam) GetExportUrl() string {
-	return config.Get().Url("/export/" + e.Prefix + e.Param.GetRouteParamStr())
-}
-
-func (e NewFormParam) getUrl(kind string) string {
-	return config.Get().Url("/info/" + e.Prefix + "/" + kind + e.Param.GetRouteParamStr())
-}
-
 func (e NewFormParam) IsManage() bool {
 	return e.Prefix == "manager"
-}
-
-func (e *NewFormParam) GetUrl() string {
-	return config.Get().Url("/edit/" + e.Prefix)
-}
-
-func (e *NewFormParam) GetInfoUrl() string {
-	return config.Get().Url("/info/" + e.Prefix + e.Param.GetRouteParamStrWithoutId())
 }
 
 func (e NewFormParam) HasAlert() bool {
@@ -104,25 +70,33 @@ func (e NewFormParam) IsRole() bool {
 	return e.Prefix == "roles"
 }
 
-func NewForm(ctx *context.Context) {
-	prefix := ctx.Query("__prefix")
-	previous := ctx.FormValue("_previous_")
-	panel := table.List[prefix]
+func (g *Guard) NewForm(ctx *context.Context) {
+	previous := ctx.FormValue(form.PreviousKey)
+	panel, prefix := g.table(ctx)
+
+	conn := db.GetConnection(g.services)
 
 	if !panel.GetCanAdd() {
-		alert(ctx, panel, "operation not allow")
+		alert(ctx, panel, "operation not allow", conn)
 		ctx.Abort()
 		return
 	}
-	token := ctx.FormValue("_t")
+	token := ctx.FormValue(form.TokenKey)
 
-	if !auth.TokenHelper.CheckToken(token) {
-		alert(ctx, panel, "edit fail, wrong token")
+	if !auth.GetTokenService(g.services.Get(auth.TokenServiceKey)).CheckToken(token) {
+		alert(ctx, panel, "create fail, wrong token", conn)
 		ctx.Abort()
 		return
 	}
 
-	param := parameter.GetParamFromUrl(previous)
+	fromList := isInfoUrl(previous)
+
+	param := parameter.GetParamFromURL(previous, panel.GetInfo().DefaultPageSize,
+		panel.GetInfo().GetSort(), panel.GetPrimaryKey().Name)
+
+	if fromList {
+		previous = config.Get().Url("/info/" + prefix + param.GetRouteParamStr())
+	}
 
 	ctx.SetUserValue("new_form_param", &NewFormParam{
 		Panel:        panel,
@@ -131,7 +105,8 @@ func NewForm(ctx *context.Context) {
 		Param:        param,
 		Path:         strings.Split(previous, "?")[0],
 		MultiForm:    ctx.Request.MultipartForm,
-		PreviousPath: config.Get().Url("/info/" + prefix + param.GetRouteParamStrWithoutId()),
+		PreviousPath: previous,
+		FromList:     fromList,
 	})
 	ctx.Next()
 }

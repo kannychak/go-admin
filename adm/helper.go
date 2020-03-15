@@ -15,7 +15,7 @@ import (
 )
 
 func cliInfo() {
-	fmt.Println("GoAdmin CLI " + system.Version + compareVersion(system.Version))
+	fmt.Println("GoAdmin CLI " + system.Version() + compareVersion(system.Version()))
 	fmt.Println()
 }
 
@@ -33,7 +33,7 @@ func checkError(err error) {
 }
 
 func getLatestVersion() string {
-	http.DefaultClient.Timeout = time.Duration(time.Second * 3)
+	http.DefaultClient.Timeout = 3 * time.Second
 	res, err := http.Get("https://goproxy.cn/github.com/!go!admin!group/go-admin/@v/list")
 
 	if err != nil || res.Body == nil {
@@ -96,7 +96,6 @@ func compareVersion(srcVersion string) string {
 	toCompareVersion := getLatestVersion()
 	if isRequireUpdate(srcVersion, toCompareVersion) {
 		return ", the latest version is " + toCompareVersion + " now."
-	} else {
-		return ""
 	}
+	return ""
 }

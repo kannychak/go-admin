@@ -2,13 +2,13 @@ package controller
 
 import (
 	"github.com/GoAdminGroup/go-admin/context"
-	"github.com/GoAdminGroup/go-admin/modules/auth"
+	"github.com/GoAdminGroup/go-admin/modules/logger"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/guard"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/response"
-	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/table"
 )
 
-func Delete(ctx *context.Context) {
+// Delete delete the row from database.
+func (h *Handler) Delete(ctx *context.Context) {
 
 	param := guard.GetDeleteParam(ctx)
 
@@ -20,9 +20,13 @@ func Delete(ctx *context.Context) {
 	//	return
 	//}
 
-	table.List[param.Prefix].DeleteDataFromDatabase(param.Id)
+	if err := h.table(param.Prefix, ctx).DeleteData(param.Id); err != nil {
+		logger.Error(err)
+		response.Error(ctx, "删除失败")
+		return
+	}
 
-	newToken := auth.TokenHelper.AddToken()
+	newToken := h.authSrv().AddToken()
 
 	response.OkWithData(ctx, map[string]interface{}{
 		"token": newToken,

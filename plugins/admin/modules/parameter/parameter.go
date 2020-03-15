@@ -1,45 +1,107 @@
 package parameter
 
 import (
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/constant"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/form"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 )
 
 type Parameters struct {
-	Page      string
-	PageSize  string
-	SortField string
-	Columns   []string
-	SortType  string
-	Fields    map[string]string
+	Page        string
+	PageInt     int
+	PageSize    string
+	PageSizeInt int
+	SortField   string
+	Columns     []string
+	SortType    string
+	Animation   bool
+	URLPath     string
+	Fields      map[string][]string
 }
 
-func GetParam(values url.Values) Parameters {
-	page := GetDefault(values, "__page", "1")
-	pageSize := GetDefault(values, "__pageSize", "10")
-	sortField := GetDefault(values, "__sort", "id")
-	sortType := GetDefault(values, "__sort_type", "desc")
-	columns := GetDefault(values, "__columns", "")
+const (
+	Page     = "__page"
+	PageSize = "__pageSize"
+	Sort     = "__sort"
+	SortType = "__sort_type"
+	Columns  = "__columns"
+	Prefix   = "__prefix"
+	Pjax     = "_pjax"
 
-	fields := make(map[string]string)
+	sortTypeDesc = "desc"
+	sortTypeAsc  = "asc"
+
+	IsAll      = "__is_all"
+	PrimaryKey = "__pk"
+
+	True  = "true"
+	False = "false"
+
+	FilterRangeParamStartSuffix = "_start__goadmin"
+	FilterRangeParamEndSuffix   = "_end__goadmin"
+	FilterParamJoinInfix        = "_goadmin_join_"
+	FilterParamOperatorSuffix   = "__goadmin_operator__"
+	FilterParamCountInfix       = "__goadmin_index__"
+
+	Separator = "__goadmin_separator__"
+)
+
+var operators = map[string]string{
+	"like": "like",
+	"gr":   ">",
+	"gq":   ">=",
+	"eq":   "=",
+	"ne":   "!=",
+	"le":   "<",
+	"lq":   "<=",
+	"free": "free",
+}
+
+var keys = []string{Page, PageSize, Sort, Columns, Prefix, Pjax, form.NoAnimationKey}
+
+func BaseParam() Parameters {
+	return Parameters{Page: "1", PageSize: "10", Fields: make(map[string][]string)}
+}
+
+func GetParam(u *url.URL, defaultPageSize int, p ...string) Parameters {
+	values := u.Query()
+
+	primaryKey := "id"
+	defaultSortType := "desc"
+
+	if len(p) > 0 {
+		primaryKey = p[0]
+		defaultSortType = p[1]
+	}
+
+	page := getDefault(values, Page, "1")
+	pageSize := getDefault(values, PageSize, strconv.Itoa(defaultPageSize))
+	sortField := getDefault(values, Sort, primaryKey)
+	sortType := getDefault(values, SortType, defaultSortType)
+	columns := getDefault(values, Columns, "")
+
+	animation := true
+	if values.Get(form.NoAnimationKey) == "true" {
+		animation = false
+	}
+
+	fields := make(map[string][]string)
 
 	for key, value := range values {
-		if key != "__page" &&
-			key != "__pageSize" &&
-			key != "__sort" &&
-			key != "__columns" &&
-			key != "__sort_type" &&
-			key != "__prefix" &&
-			key != "_pjax" &&
-			value[0] != "" {
-			if key == "__sort_type" {
-				if value[0] != "desc" && value[0] != "asc" {
-					fields[key] = "desc"
+		if !modules.InArray(keys, key) && len(value) > 0 && value[0] != "" {
+			if key == SortType {
+				if value[0] != sortTypeDesc && value[0] != sortTypeAsc {
+					fields[key] = []string{sortTypeDesc}
 				}
 			} else {
-				fields[key] = value[0]
+				if strings.Contains(key, FilterParamOperatorSuffix) &&
+					values.Get(strings.Replace(key, FilterParamOperatorSuffix, "", -1)) == "" {
+					continue
+				}
+				fields[strings.Replace(key, "[]", "", -1)] = value
 			}
 		}
 	}
@@ -49,51 +111,101 @@ func GetParam(values url.Values) Parameters {
 		columnsArr = strings.Split(columns, ",")
 	}
 
+	pageInt, _ := strconv.Atoi(page)
+	pageSizeInt, _ := strconv.Atoi(pageSize)
+
 	return Parameters{
-		Page:      page,
-		PageSize:  pageSize,
-		SortField: sortField,
-		SortType:  sortType,
-		Fields:    fields,
-		Columns:   columnsArr,
+		Page:        page,
+		PageSize:    pageSize,
+		PageSizeInt: pageSizeInt,
+		PageInt:     pageInt,
+		URLPath:     u.Path,
+		SortField:   sortField,
+		SortType:    sortType,
+		Fields:      fields,
+		Animation:   animation,
+		Columns:     columnsArr,
 	}
 }
 
-func GetParamFromUrl(value string) Parameters {
-	prevUrlArr := strings.Split(value, "?")
-	paramArr := strings.Split(prevUrlArr[1], "&")
+func GetParamFromURL(urlStr string, defaultPageSize int, defaultSortType, primaryKey string) Parameters {
 
-	var (
-		page      = "1"
-		pageSize  = "10"
-		sortField = "id"
-		sortType  = "desc"
-		columns   = make([]string, 0)
-	)
+	u, err := url.Parse(urlStr)
 
-	for i := 0; i < len(paramArr); i++ {
-		arr := strings.Split(paramArr[i], "=")
-		switch arr[0] {
-		case "__pageSize":
-			pageSize = arr[1]
-		case "__page":
-			page = arr[1]
-		case "__sort":
-			sortField = arr[1]
-		case "__sort_type":
-			sortType = arr[1]
-		case "__columns":
-			columns = strings.Split(arr[1], ",")
-		}
+	if err != nil {
+		return BaseParam()
 	}
 
-	return Parameters{
-		Page:      page,
-		PageSize:  pageSize,
-		SortField: sortField,
-		SortType:  sortType,
-		Columns:   columns,
+	return GetParam(u, defaultPageSize, primaryKey, defaultSortType)
+}
+
+func (param Parameters) WithPKs(id ...string) Parameters {
+	param.Fields[PrimaryKey] = []string{strings.Join(id, ",")}
+	return param
+}
+
+func (param Parameters) PKs() []string {
+	return strings.Split(param.GetFieldValue(PrimaryKey), ",")
+}
+
+func (param Parameters) PK() string {
+	return param.PKs()[0]
+}
+
+func (param Parameters) IsAll() bool {
+	return param.GetFieldValue(IsAll) == True
+}
+
+func (param Parameters) WithURLPath(path string) Parameters {
+	param.URLPath = path
+	return param
+}
+
+func (param Parameters) WithIsAll(isAll bool) Parameters {
+	if isAll {
+		param.Fields[IsAll] = []string{True}
+	} else {
+		param.Fields[IsAll] = []string{False}
 	}
+	return param
+}
+
+func (param Parameters) GetFilterFieldValueStart(field string) string {
+	return param.GetFieldValue(field + FilterRangeParamStartSuffix)
+}
+
+func (param Parameters) GetFilterFieldValueEnd(field string) string {
+	return param.GetFieldValue(field + FilterRangeParamEndSuffix)
+}
+
+func (param Parameters) GetFieldValue(field string) string {
+	value, ok := param.Fields[field]
+	if ok && len(value) > 0 {
+		return value[0]
+	}
+	return ""
+}
+
+func (param Parameters) GetFieldValues(field string) []string {
+	return param.Fields[field]
+}
+
+func (param Parameters) GetFieldValuesStr(field string) string {
+	return strings.Join(param.Fields[field], Separator)
+}
+
+func (param Parameters) GetFieldOperator(field, suffix string) string {
+	op := param.GetFieldValue(field + FilterParamOperatorSuffix + suffix)
+	if op == "" {
+		return "eq"
+	}
+	return op
+}
+
+func (param Parameters) Join() string {
+	p := param.GetFixedParamStr()
+	p.Add(Page, param.Page)
+	return p.Encode()
 }
 
 func (param Parameters) SetPage(page string) Parameters {
@@ -102,55 +214,147 @@ func (param Parameters) SetPage(page string) Parameters {
 }
 
 func (param Parameters) GetRouteParamStr() string {
-	return "?__page=" + param.Page + param.GetFixedParamStr()
+	p := param.GetFixedParamStr()
+	p.Add(Page, param.Page)
+	return "?" + p.Encode()
 }
 
-func (param Parameters) GetRouteParamStrWithoutId() string {
-	return regexp.MustCompile(`&id=[0-9]+`).ReplaceAllString(param.GetRouteParamStr(), "")
+func (param Parameters) URL(page string) string {
+	return param.URLPath + param.SetPage(page).GetRouteParamStr()
+}
+
+func (param Parameters) URLNoAnimation(page string) string {
+	return param.URLPath + param.SetPage(page).GetRouteParamStr() + "&" + form.NoAnimationKey + "=true"
 }
 
 func (param Parameters) GetRouteParamStrWithoutPageSize() string {
-	return "?__page=" + param.Page + param.GetFixedParamStrWithoutPageSize()
+	p := url.Values{}
+	p.Add(Sort, param.SortField)
+	p.Add(Page, param.Page)
+	p.Add(SortType, param.SortType)
+	if len(param.Columns) > 0 {
+		p.Add(Columns, strings.Join(param.Columns, ","))
+	}
+	for key, value := range param.Fields {
+		p[key] = value
+	}
+	return "?" + p.Encode()
 }
 
 func (param Parameters) GetLastPageRouteParamStr() string {
-	pageInt, _ := strconv.Atoi(param.Page)
-	return "?__page=" + strconv.Itoa(pageInt-1) + param.GetFixedParamStr()
+	p := param.GetFixedParamStr()
+	p.Add(Page, strconv.Itoa(param.PageInt-1))
+	return "?" + p.Encode()
 }
 
 func (param Parameters) GetNextPageRouteParamStr() string {
-	pageInt, _ := strconv.Atoi(param.Page)
-	return "?__page=" + strconv.Itoa(pageInt+1) + param.GetFixedParamStr()
+	p := param.GetFixedParamStr()
+	p.Add(Page, strconv.Itoa(param.PageInt+1))
+	return "?" + p.Encode()
 }
 
-func (param Parameters) GetFixedParamStrWithoutPageSize() string {
-	str := "&"
-	for key, value := range param.Fields {
-		str += key + "=" + value + "&"
-	}
+func (param Parameters) GetFixedParamStr() url.Values {
+	p := url.Values{}
+	p.Add(Sort, param.SortField)
+	p.Add(PageSize, param.PageSize)
+	p.Add(SortType, param.SortType)
 	if len(param.Columns) > 0 {
-		return "&__columns=" + strings.Join(param.Columns, ",") + "&__sort=" + param.SortField +
-			"&__sort_type=" + param.SortType + str[:len(str)-1]
-	} else {
-		return "&__sort=" + param.SortField + "&__sort_type=" + param.SortType + str[:len(str)-1]
+		p.Add(Columns, strings.Join(param.Columns, ","))
 	}
-}
-
-func (param Parameters) GetFixedParamStr() string {
-	str := "&"
 	for key, value := range param.Fields {
-		str += key + "=" + value + "&"
+		if key != constant.EditPKKey && key != constant.DetailPKKey {
+			p[key] = value
+		}
 	}
-	if len(param.Columns) > 0 {
-		return "&__columns=" + strings.Join(param.Columns, ",") + "&__pageSize=" + param.PageSize + "&__sort=" +
-			param.SortField + "&__sort_type=" + param.SortType + str[:len(str)-1]
-	} else {
-		return "&__pageSize=" + param.PageSize + "&__sort=" +
-			param.SortField + "&__sort_type=" + param.SortType + str[:len(str)-1]
-	}
+	return p
 }
 
-func GetDefault(values url.Values, key, def string) string {
+func (param Parameters) Statement(wheres, table, delimiter string, whereArgs []interface{}, columns, existKeys []string,
+	filterProcess func(string, string, string) string, getJoinTable func(string) string) (string, []interface{}, []string) {
+	var multiKey = make(map[string]uint8)
+	for key, value := range param.Fields {
+
+		keyIndexSuffix := ""
+
+		keyArr := strings.Split(key, FilterParamCountInfix)
+
+		if len(keyArr) > 1 {
+			key = keyArr[0]
+			keyIndexSuffix = FilterParamCountInfix + keyArr[1]
+		}
+
+		if keyIndexSuffix != "" {
+			multiKey[key] = 0
+		} else if _, exist := multiKey[key]; !exist && modules.InArray(existKeys, key) {
+			continue
+		}
+
+		var op string
+		if strings.Contains(key, FilterRangeParamEndSuffix) {
+			key = strings.Replace(key, FilterRangeParamEndSuffix, "", -1)
+			op = "<="
+		} else if strings.Contains(key, FilterRangeParamStartSuffix) {
+			key = strings.Replace(key, FilterRangeParamStartSuffix, "", -1)
+			op = ">="
+		} else if len(value) > 1 {
+			op = "in"
+		} else if !strings.Contains(key, FilterParamOperatorSuffix) {
+			op = operators[param.GetFieldOperator(key, keyIndexSuffix)]
+		}
+
+		if modules.InArray(columns, key) {
+			if op == "in" {
+				qmark := ""
+				for range value {
+					qmark += "?,"
+				}
+				wheres += table + "." + modules.FilterField(key, delimiter) + " " + op + " (" + qmark[:len(qmark)-1] + ") and "
+			} else {
+				wheres += table + "." + modules.FilterField(key, delimiter) + " " + op + " ? and "
+			}
+			if op == "like" && !strings.Contains(value[0], "%") {
+				whereArgs = append(whereArgs, "%"+filterProcess(key, value[0], keyIndexSuffix)+"%")
+			} else {
+				for _, v := range value {
+					whereArgs = append(whereArgs, v)
+				}
+			}
+		} else {
+			keys := strings.Split(key, FilterParamJoinInfix)
+			if len(keys) > 1 {
+				if joinTable := getJoinTable(keys[1]); joinTable != "" {
+					val := filterProcess(key, value[0], keyIndexSuffix)
+					if op == "in" {
+						qmark := ""
+						for range value {
+							qmark += "?,"
+						}
+						wheres += joinTable + "." + modules.FilterField(keys[1], delimiter) + " " + op + " (" + qmark[:len(qmark)-1] + ") and "
+					} else {
+						wheres += joinTable + "." + modules.FilterField(keys[1], delimiter) + " " + op + " ? and "
+					}
+					if op == "like" && !strings.Contains(val, "%") {
+						whereArgs = append(whereArgs, "%"+val+"%")
+					} else {
+						for _, v := range value {
+							whereArgs = append(whereArgs, v)
+						}
+					}
+				}
+			}
+		}
+
+		existKeys = append(existKeys, key)
+	}
+
+	if len(wheres) > 3 {
+		wheres = wheres[:len(wheres)-4]
+	}
+
+	return wheres, whereArgs, existKeys
+}
+
+func getDefault(values url.Values, key, def string) string {
 	value := values.Get(key)
 	if value == "" {
 		return def

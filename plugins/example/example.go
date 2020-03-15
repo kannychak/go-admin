@@ -3,6 +3,7 @@ package example
 import (
 	"github.com/GoAdminGroup/go-admin/context"
 	c "github.com/GoAdminGroup/go-admin/modules/config"
+	"github.com/GoAdminGroup/go-admin/modules/service"
 	"github.com/GoAdminGroup/go-admin/plugins"
 )
 
@@ -22,15 +23,19 @@ func SetConfig(cfg c.Config) {
 	config = cfg
 }
 
-func (example *Example) InitPlugin() {
+var services service.List
+
+func (example *Example) InitPlugin(srv service.List) {
 	config = c.Get()
-	Plug.app = InitRouter(config.Prefix())
+
+	Plug.app = InitRouter(config.Prefix(), srv)
+	services = srv
 }
 
 func (example *Example) GetRequest() []context.Path {
 	return example.app.Requests
 }
 
-func (example *Example) GetHandler(url, method string) context.Handlers {
-	return plugins.GetHandler(url, method, example.app)
+func (example *Example) GetHandler() context.HandlerMap {
+	return plugins.GetHandler(example.app)
 }

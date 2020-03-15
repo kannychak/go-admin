@@ -11,19 +11,17 @@ type DeleteParam struct {
 	Prefix string
 }
 
-func Delete(ctx *context.Context) {
-
-	prefix := ctx.Query("__prefix")
-	panel := table.List[prefix]
+func (g *Guard) Delete(ctx *context.Context) {
+	panel, prefix := g.table(ctx)
 	if !panel.GetDeletable() {
-		alert(ctx, panel, "operation not allow")
+		alert(ctx, panel, "operation not allow", g.conn)
 		ctx.Abort()
 		return
 	}
 
 	id := ctx.FormValue("id")
 	if id == "" {
-		alert(ctx, panel, "wrong id")
+		alert(ctx, panel, "wrong id", g.conn)
 		ctx.Abort()
 		return
 	}

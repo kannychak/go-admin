@@ -1,8 +1,6 @@
 package modules
 
 import (
-	"bytes"
-	"encoding/gob"
 	"github.com/satori/go.uuid"
 	"strconv"
 )
@@ -14,6 +12,20 @@ func InArray(arr []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func Delimiter(del, s string) string {
+	if del == "[" {
+		return "[" + s + "]"
+	}
+	return del + s + del
+}
+
+func FilterField(filed, delimiter string) string {
+	if delimiter == "[" {
+		return filed
+	}
+	return delimiter + filed + delimiter
 }
 
 func InArrayWithoutEmpty(arr []string, str string) bool {
@@ -58,25 +70,16 @@ func GetPage(page string) (pageInt int) {
 	return
 }
 
-func CopyMap(m map[string]string) map[string]string {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	dec := gob.NewDecoder(&buf)
-	err := enc.Encode(m)
-	if err != nil {
-		panic(err)
-	}
-	var cm map[string]string
-	err = dec.Decode(&cm)
-	if err != nil {
-		panic(err)
-	}
-	return cm
-}
-
 func AorB(condition bool, a string, b string) string {
 	if condition {
 		return a
 	}
 	return b
+}
+
+func AorEmpty(condition bool, a string) string {
+	if condition {
+		return a
+	}
+	return ""
 }

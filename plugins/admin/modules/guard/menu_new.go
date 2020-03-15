@@ -3,6 +3,7 @@ package guard
 import (
 	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/auth"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/form"
 	"html/template"
 	"strconv"
 )
@@ -21,7 +22,7 @@ func (e MenuNewParam) HasAlert() bool {
 	return e.Alert != template.HTML("")
 }
 
-func MenuNew(ctx *context.Context) {
+func (g *Guard) MenuNew(ctx *context.Context) {
 
 	parentId := ctx.FormValue("parent_id")
 	if parentId == "" {
@@ -30,10 +31,10 @@ func MenuNew(ctx *context.Context) {
 
 	var (
 		alert template.HTML
-		token = ctx.FormValue("_t")
+		token = ctx.FormValue(form.TokenKey)
 	)
 
-	if !auth.TokenHelper.CheckToken(token) {
+	if !auth.GetTokenService(g.services.Get(auth.TokenServiceKey)).CheckToken(token) {
 		alert = getAlert("edit fail, wrong token")
 	}
 

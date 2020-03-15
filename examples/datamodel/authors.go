@@ -1,14 +1,16 @@
 package datamodel
 
 import (
+	"github.com/GoAdminGroup/go-admin/context"
 	"github.com/GoAdminGroup/go-admin/modules/db"
 	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/table"
 	"github.com/GoAdminGroup/go-admin/template/types/form"
 )
 
-func GetAuthorsTable() (authorsTable table.Table) {
+// GetAuthorsTable return the model of table author.
+func GetAuthorsTable(ctx *context.Context) (authorsTable table.Table) {
 
-	authorsTable = table.NewDefaultTable(table.DefaultConfig)
+	authorsTable = table.NewDefaultTable(table.DefaultConfig())
 
 	// connect your custom connection
 	// authorsTable = table.NewDefaultTable(table.DefaultConfigWithDriverAndConnection("mysql", "admin"))
@@ -24,7 +26,7 @@ func GetAuthorsTable() (authorsTable table.Table) {
 	info.SetTable("authors").SetTitle("Authors").SetDescription("Authors")
 
 	formList := authorsTable.GetForm()
-	formList.AddField("ID", "id", db.Int, form.Default).FieldNotAllowEdit()
+	formList.AddField("ID", "id", db.Int, form.Default).FieldNotAllowEdit().FieldNotAllowAdd()
 	formList.AddField("First Name", "first_name", db.Varchar, form.Text)
 	formList.AddField("Last Name", "last_name", db.Varchar, form.Text)
 	formList.AddField("Email", "email", db.Varchar, form.Text)
